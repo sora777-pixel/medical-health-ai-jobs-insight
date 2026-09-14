@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import sys
@@ -9,7 +10,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
-from .config import Config
+from .config import Config, SourceSettings
 
 Level = Literal["ok", "warning", "error"]
 
@@ -94,7 +95,11 @@ def _source_checks(config: Config) -> list[Check]:
                 continue
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
-                count = len(payload) if isinstance(payload, list) else len(payload.get("postings") or payload.get("jobs") or [])
+                count = (
+                    len(payload)
+                    if isinstance(payload, list)
+                    else len(payload.get("postings") or payload.get("jobs") or [])
+                )
                 checks.append(Check(f"source:{source.name}", "ok", f"本地数据源可读：{count} 条"))
             except (OSError, json.JSONDecodeError, AttributeError) as exc:
                 checks.append(Check(f"source:{source.name}", "error", f"本地数据源无效：{exc}"))
@@ -104,12 +109,54 @@ def _source_checks(config: Config) -> list[Check]:
                 if not source.urls:
                     checks.append(Check(f"source:{source.name}", "error", f"{source.type} 没有配置 urls"))
                 else:
-                    checks.append(Check(f"source:{source.name}", "ok", f"{source.type} 已配置 {len(source.urls)} 个 URL"))
+                    checks.append(
+                        Check(f"source:{source.name}", "ok", f"{source.type} 已配置 {len(source.urls)} 个 URL")
+                    )
+                if source.type == "browser":
+                    checks.extend(_browser_checks(config, source))
             else:
                 checks.append(Check(f"source:{source.name}", "warning", f"自定义来源类型：{source.type}"))
 
     if real_count == 0:
         checks.append(Check("real-sources", "warning", "仅启用了 fixture，本次不会获取招聘网站的新数据"))
+    return checks
+
+
+def _browser_checks(config: Config, source: SourceSettings) -> list[Check]:
+    from .accounts import DEFAULT_ACCOUNTS_FILE, get_account, storage_path
+    from .config import ConfigError
+
+    checks: list[Check] = []
+    if importlib.util.find_spec("playwright") is None:
+        checks.append(
+            Check(
+                f"browser:{source.name}:dependency",
+                "error",
+                "尚未安装 Playwright",
+                "pip install -e '.[browser]' && playwright install chromium",
+            )
+        )
+    account_name = str(source.options.get("account") or source.name)
+    accounts_file = str(source.options.get("accounts_file") or DEFAULT_ACCOUNTS_FILE)
+    try:
+        account = get_account(config.project_root, account_name, accounts_file)
+    except ConfigError as exc:
+        checks.append(Check(f"browser:{source.name}:account", "error", str(exc)))
+        return checks
+    state = storage_path(config.project_root, account)
+    if state.is_file():
+        checks.append(Check(f"browser:{source.name}:session", "ok", f"登录会话存在：{state}"))
+    elif account.resolved_username() and account.resolved_password():
+        checks.append(Check(f"browser:{source.name}:credentials", "ok", "账号环境变量已配置"))
+    else:
+        checks.append(
+            Check(
+                f"browser:{source.name}:session",
+                "error",
+                "既没有登录会话，也没有完整账号环境变量",
+                f"执行 python -m jobsinsight browser-login {account_name}",
+            )
+        )
     return checks
 
 

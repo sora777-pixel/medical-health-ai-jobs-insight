@@ -109,11 +109,13 @@ npm run preview
 
 ### 连接自动化接口
 
-自动化面板会先读静态的 `public/data/insights.json`（任何部署方式下都有），
-再尝试请求 `/api/status`。接口在线时才显示「立即运行」与运行时间编辑器。
+岗位、统计和洞察会优先读取实时 `/api/data/*.json`；后端不可用时自动回退到
+`BASE_URL/data/*.json` 静态快照，因此部署在 GitHub Pages 子路径时也能正确加载。
+关键数据失败会显示具体错误和重试入口，猎头/机构等可选文件失败不会让页面永久 Loading。
+自动化面板再请求 `/api/status`，接口在线时才显示「立即运行」与运行时间编辑器。
 
 - `python -m jobsinsight serve` 会同时托管 `web/dist` 与 `/api/*`，同源，无需额外配置。
-- `npm run dev` 与后端不同源时，用环境变量指向后端：
+- `npm run dev` 已将 `/api` 代理到 `127.0.0.1:8787`；不同地址时用环境变量覆盖：
 
 ```bash
 # web/.env.local

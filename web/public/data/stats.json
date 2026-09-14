@@ -1,6 +1,6 @@
 {
   "total_jobs": 398,
-  "last_update": "2026-09-09",
+  "last_update": "2026-09-14",
   "new_jobs_today": 0,
   "updated_jobs_today": 0,
   "deleted_jobs_today": 0,
@@ -199,5 +199,8 @@
       "top_title": "医疗机器学习工程师",
       "top_title_count": 8
     }
-  }
+  },
+  "run_id": "20260914T114122Z",
+  "generated_at": "2026-09-14T11:41:22+00:00",
+  "data_version": "b31552a175adfe6e"
 }

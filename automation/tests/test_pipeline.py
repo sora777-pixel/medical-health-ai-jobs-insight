@@ -197,6 +197,20 @@ def test_min_relevance_of_zero_keeps_off_topic_postings(config: Config):
     assert Pipeline(config).run().kept == 3
 
 
+def test_all_filtered_run_fails_without_overwriting_last_good_data(config: Config):
+    config.output.min_relevance = 100
+    config.data_dir.mkdir(parents=True)
+    sentinel = [{"title": "上一版有效岗位"}]
+    (config.data_dir / "jobs.json").write_text(json.dumps(sentinel), encoding="utf-8")
+
+    report = Pipeline(config).run()
+
+    assert report.status == "failed"
+    assert report.kept == 0
+    assert "保留上一版数据" in report.errors[0]
+    assert read(config.data_dir / "jobs.json") == sentinel
+
+
 def test_fixture_collector_filters_by_city_and_keyword(config: Config, seed_file: Path):
     context = CollectorContext(project_root=config.project_root)
 

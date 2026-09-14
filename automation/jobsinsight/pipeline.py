@@ -111,6 +111,10 @@ class Pipeline:
         kept, dropped = self._filter(jobs)
         report.kept = len(kept)
         report.dropped_low_relevance = dropped
+        if not kept:
+            report.status = "failed"
+            report.errors.append("所有岗位都被相关度过滤器丢弃；保留上一版数据，未写入空文件")
+            return self._finish(report, started, persist=not dry_run)
 
         previous = self.store.load_snapshot()
         diff = analysis.diff_jobs(previous, kept)
@@ -223,6 +227,7 @@ class Pipeline:
         files = [JOBS_FILE, STATS_FILE]
         if self.config.output.write_insights:
             files.append(INSIGHTS_FILE)
+        files.append(MANIFEST_FILE)
         manifest = {
             "schema_version": 1,
             "run_id": report.run_id,

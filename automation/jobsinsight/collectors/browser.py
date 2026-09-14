@@ -91,9 +91,7 @@ class BrowserCollector(Collector):
         self._reject_verification(page, account)
         logged_in = selectors.get("logged_in")
         if logged_in and not page.locator(logged_in).first.is_visible():
-            raise CollectorError(
-                f"账号 {account.name!r} 登录后未找到登录标志；请用 browser-login 人工确认并保存会话"
-            )
+            raise CollectorError(f"账号 {account.name!r} 登录后未找到登录标志；请用 browser-login 人工确认并保存会话")
         state.parent.mkdir(parents=True, exist_ok=True)
         page.context.storage_state(path=str(state))
 
@@ -120,9 +118,7 @@ class BrowserCollector(Collector):
             link = _attribute(card, selectors.get("link"), "href")
             results.append(
                 RawPosting(
-                    source_id=_attribute(card, selectors.get("source_id"), "data-id")
-                    or link
-                    or f"{page_url}#{index}",
+                    source_id=_attribute(card, selectors.get("source_id"), "data-id") or link or f"{page_url}#{index}",
                     platform=self.settings.platform or self.settings.name,
                     title=title,
                     company=_text(card, selectors.get("company")),
