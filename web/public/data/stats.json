@@ -1,7 +1,7 @@
 {
   "total_jobs": 398,
   "last_update": "2026-09-14",
-  "new_jobs_today": 0,
+  "new_jobs_today": 398,
   "updated_jobs_today": 0,
   "deleted_jobs_today": 0,
   "avg_salary": 63.9,
@@ -200,8 +200,8 @@
       "top_title_count": 8
     }
   },
-  "run_id": "20260914T115451Z",
-  "generated_at": "2026-09-14T11:54:51+00:00",
+  "run_id": "20260914T201441Z",
+  "generated_at": "2026-09-14T20:14:41+00:00",
   "data_version": "b31552a175adfe6e",
   "quality": {
     "score": 75,
