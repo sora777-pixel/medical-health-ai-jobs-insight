@@ -9,7 +9,9 @@ from jobsinsight.config import (
     Config,
     ConfigError,
     LLMSettings,
+    OutputSettings,
     ScheduleSettings,
+    SourceSettings,
     load_config,
     save_overrides,
 )
@@ -169,3 +171,10 @@ def test_duplicate_source_names_are_rejected(tmp_path: Path):
     text = '[[sources]]\nname = "dup"\ntype = "fixture"\n\n[[sources]]\nname = "dup"\ntype = "fixture"\n'
     with pytest.raises(ConfigError, match="duplicate"):
         load_config(write_config(tmp_path, text))
+
+
+def test_invalid_source_minimum_and_quality_gate_are_rejected():
+    with pytest.raises(ConfigError, match="min_collected"):
+        Config(sources=[SourceSettings(name="bad", min_collected=-1)]).validate()
+    with pytest.raises(ConfigError, match="min_quality_score"):
+        Config(output=OutputSettings(min_quality_score=101)).validate()

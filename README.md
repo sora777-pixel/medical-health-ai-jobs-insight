@@ -145,6 +145,10 @@ register_provider("my-gateway", lambda options: MyProvider(**options))
 `python -m jobsinsight browser-login <账号名>` 人工完成首次登录。私密配置和浏览器
 Cookie 均被 Git 忽略。该采集器不会规避验证码、风控或平台访问限制；请遵守平台条款。
 
+生产来源建议设置 `required = true` 和合理的 `min_collected`。必需来源失败、采集量
+异常或数据质量低于 `output.min_quality_score` 时，流水线会保留上一版有效数据，
+并把连续失败次数写入 `automation/state/sources_health.json`。
+
 ## HTTP 控制接口
 
 `python -m jobsinsight serve` 之后：
@@ -173,6 +177,10 @@ Cookie 均被 Git 忽略。该采集器不会规避验证码、风控或平台�
 - `stats.json` —— 平台/城市/技能/经验/学历/级别/方向/薪资分布等聚合结果，含今日新增、更新、下架
 - `insights.json` —— 每日洞察（模型撰写或统计规则生成）+ 运行时间与上次运行信息
 - `manifest.json` —— 本轮 run ID、数据版本、有效条数、来源与文件清单
+
+`manifest.json` 同时包含 `quality`（0–100 分、缺失字段与警告）和 `freshness`
+（最新/最旧发布日期、中位数据年龄、过期数量）。前端状态条会显示这些信息；
+`/api/health`、`/api/status` 和 `/api/doctor` 可供监控系统读取。
 
 运行状态在 `automation/state/`（不入库）：`state.json`（上次运行时间）、`runs.json`（运行历史）、
 `jobs_snapshot.json`（用于算增量）、`overrides.json`（运行时改过的配置）。

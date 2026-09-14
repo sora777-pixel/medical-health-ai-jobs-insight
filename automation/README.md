@@ -37,6 +37,11 @@ python -m jobsinsight --help
 5. **落盘**：原子写入 `jobs.json`、`stats.json`、`insights.json`、`manifest.json`，
    更新 `state/` 下的快照、运行历史与上次运行时间。
 
+发布前还会计算数据质量与新鲜度。`required = true` 的来源失败、采集量低于
+`min_collected`、全部岗位被过滤，或质量分低于 `output.min_quality_score` 时，
+不会覆盖上一版数据。每个来源的最近成功时间、连续失败次数和耗时保存在
+`state/sources_health.json`。
+
 ## 关键模块
 
 - `cron.py` —— 自己实现的 5 字段 cron 解析器。支持 `*`、`a`、`a-b`、`a-b/n`、`*/n`、
@@ -92,6 +97,10 @@ python -m jobsinsight doctor
 在 `config.toml` 中启用 `type = "browser"` 的来源并设置搜索 URL。selector 在私密
 `accounts.toml` 中按网站实际页面维护；密码和 storage state 不入库。验证码必须人工
 完成，采集器不会尝试绕过风控。
+
+生产部署可执行 `python -m jobsinsight doctor --strict`，此时包括“仍使用 mock”或
+“只有 fixture 来源”在内的警告也会返回非零退出码。运行服务后还可读取
+`/api/health`、`/api/status`、`/api/doctor` 获取数据版本、年龄、质量和来源健康。
 
 ## 测试
 

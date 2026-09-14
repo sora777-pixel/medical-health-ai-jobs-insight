@@ -126,6 +126,11 @@ def test_doctor_reports_machine_readable_preflight(config_file: Path, capsys: py
     assert any(check["name"] == "source:seed" for check in report["checks"])
 
 
+def test_doctor_strict_fails_on_production_warnings(config_file: Path, capsys: pytest.CaptureFixture[str]):
+    assert run_cli(config_file, "doctor", "--strict") == 1
+    assert "警告" in capsys.readouterr().out
+
+
 def test_llm_command_calls_the_provider(config_file: Path, capsys: pytest.CaptureFixture[str]):
     assert run_cli(config_file, "llm", "你好") == 0
     assert "[mock] 你好" in capsys.readouterr().out
