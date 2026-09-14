@@ -40,6 +40,7 @@ def test_run_writes_every_data_file(config: Config):
     jobs = read(config.data_dir / "jobs.json")
     stats = read(config.data_dir / "stats.json")
     insights = read(config.data_dir / "insights.json")
+    manifest = read(config.data_dir / "manifest.json")
 
     assert [job["id"] for job in jobs] == [1, 2]
     assert {job["title"] for job in jobs} == {"高级医学影像算法工程师", "AI药物研发工程师"}
@@ -47,6 +48,11 @@ def test_run_writes_every_data_file(config: Config):
     assert stats["new_jobs_today"] == 2
     assert insights["schedule"]["description"] == "每天 00:00 (Asia/Shanghai)"
     assert insights["headline"]
+    assert manifest["run_id"] == report.run_id
+    assert manifest["data_version"] == report.data_version
+    assert manifest["counts"] == {"raw": 3, "valid": 2, "dropped": 1}
+    assert stats["data_version"] == report.data_version
+    assert insights["data_version"] == report.data_version
 
 
 def test_llm_enriched_fields_are_used(config: Config):

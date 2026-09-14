@@ -82,6 +82,20 @@ def test_environment_variables_override_the_file(tmp_path: Path, monkeypatch: py
     assert config.server.port == 9001
 
 
+def test_empty_environment_variables_do_not_erase_file_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Unset Actions Variables arrive as empty strings, not absent variables."""
+
+    monkeypatch.setenv("JOBSINSIGHT_LLM_PROVIDER", "")
+    monkeypatch.setenv("JOBSINSIGHT_LLM_MODEL", "   ")
+    monkeypatch.setenv("JOBSINSIGHT_SCHEDULE_MODE", "")
+
+    config = load_config(write_config(tmp_path))
+
+    assert config.llm.provider == "deepseek"
+    assert config.llm.model == "deepseek-chat"
+    assert config.schedule.mode == "cron"
+
+
 def test_missing_env_placeholder_becomes_empty_with_a_default(tmp_path: Path):
     config = load_config(write_config(tmp_path, '[llm]\napi_key = "${NOT_SET_ANYWHERE:-fallback}"\n'))
     assert config.llm.api_key == "fallback"

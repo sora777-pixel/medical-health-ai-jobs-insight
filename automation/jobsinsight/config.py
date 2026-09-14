@@ -440,7 +440,12 @@ def _env_overrides() -> dict[str, Any]:
     overrides: dict[str, Any] = {}
     for suffix, path in ENV_MAP.items():
         value = os.environ.get(ENV_PREFIX + suffix)
-        if value is None:
+        # GitHub Actions turns an unset repository Variable into an empty
+        # environment variable. Treat whitespace-only values as "not set" so
+        # they cannot erase a valid provider/model from config.toml. An API
+        # key may intentionally be empty; omitting that override has the same
+        # effective result because the file placeholder already resolves it.
+        if value is None or not value.strip():
             continue
         cursor: MutableMapping[str, Any] = overrides
         for key in path[:-1]:

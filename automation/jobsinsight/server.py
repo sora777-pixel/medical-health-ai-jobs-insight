@@ -51,7 +51,7 @@ SCHEDULE_FIELDS = (
     "run_on_start",
 )
 
-DATA_FILES = ("jobs", "stats", "insights", "headhunters", "agencies")
+DATA_FILES = ("jobs", "stats", "insights", "manifest", "headhunters", "agencies")
 
 
 class ApiError(Exception):
@@ -285,6 +285,13 @@ def make_handler(service: AutomationService) -> type[BaseHTTPRequestHandler]:
                 name = path.rsplit("/", 1)[-1].removesuffix(".json")
                 self._guard(lambda: service.data_file(name))
                 return
+            # In service/Docker mode the pipeline writes web/public/data after
+            # the frontend was built. Serve these live files ahead of dist so
+            # `/data/*.json` changes immediately without rebuilding the SPA.
+            if path.startswith("/data/"):
+                name = path.rsplit("/", 1)[-1].removesuffix(".json")
+                self._guard(lambda: service.data_file(name))
+                return
             if path.startswith("/api/"):
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"未知接口 {path}"})
                 return
@@ -371,6 +378,8 @@ def make_handler(service: AutomationService) -> type[BaseHTTPRequestHandler]:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
+            if content_type.startswith("application/json"):
+                self.send_header("Cache-Control", "no-store")
             # Idle keep-alive sockets that this single-purpose server later drops
             # surface as spurious 408s in the browser console, so close each one.
             self.send_header("Connection", "close")

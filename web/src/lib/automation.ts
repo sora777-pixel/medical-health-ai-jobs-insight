@@ -89,6 +89,7 @@ export type ScheduleUpdate = Partial<
 
 const API_BASE = (import.meta.env.VITE_AUTOMATION_API ?? '').replace(/\/$/, '')
 const API_TOKEN = import.meta.env.VITE_AUTOMATION_TOKEN ?? ''
+const STATIC_BASE = import.meta.env.BASE_URL || './'
 
 export class AutomationApiError extends Error {}
 
@@ -99,19 +100,52 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   const response = await fetch(`${API_BASE}${path}`, { ...init, headers })
   const text = await response.text()
-  const payload = text ? JSON.parse(text) : null
+  let payload: unknown = null
+  try {
+    payload = text ? JSON.parse(text) : null
+  } catch {
+    throw new AutomationApiError(`${path} 返回的不是 JSON（HTTP ${response.status}）`)
+  }
 
   if (!response.ok) {
-    throw new AutomationApiError(payload?.error ?? `请求失败（HTTP ${response.status}）`)
+    const message =
+      typeof payload === 'object' && payload && 'error' in payload
+        ? String(payload.error)
+        : `请求失败（HTTP ${response.status}）`
+    throw new AutomationApiError(message)
   }
   return payload as T
 }
 
-/** 静态产出文件，不需要后端进程。 */
+/**
+ * 优先读实时 API；本项目部署为纯静态站点时，回退到 Vite BASE_URL 下的
+ * data 快照。不能使用 `/data/...`，否则 GitHub Pages 子目录会 404。
+ */
+export async function fetchDataFile<T>(name: string): Promise<T> {
+  const errors: string[] = []
+  try {
+    return await request<T>(`/api/data/${name}.json`)
+  } catch (cause) {
+    errors.push(cause instanceof Error ? cause.message : String(cause))
+  }
+
+  const staticUrl = `${STATIC_BASE}data/${name}.json`
+  try {
+    const response = await fetch(staticUrl, { cache: 'no-store' })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const type = response.headers.get('content-type') ?? ''
+    if (type && !type.includes('json')) throw new Error(`返回类型是 ${type}，不是 JSON`)
+    return (await response.json()) as T
+  } catch (cause) {
+    errors.push(`${staticUrl}: ${cause instanceof Error ? cause.message : String(cause)}`)
+  }
+  throw new AutomationApiError(`无法加载 ${name}.json：${errors.join('；')}`)
+}
+
+/** 静态/实时洞察均不可用时返回 null，不影响岗位主数据。 */
 export async function fetchInsights(): Promise<AutomationInsights | null> {
   try {
-    const response = await fetch('/data/insights.json', { cache: 'no-store' })
-    return response.ok ? ((await response.json()) as AutomationInsights) : null
+    return await fetchDataFile<AutomationInsights>('insights')
   } catch {
     return null
   }

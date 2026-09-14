@@ -1,0 +1,56 @@
+# 私密账号配置示例
+#
+# 1. 复制本文件：
+#      copy automation\config\accounts.example.toml automation\config\accounts.toml
+# 2. 将账号密码放在环境变量里，不建议直接写明文：
+#      set BOSS_USERNAME=你的手机号
+#      set BOSS_PASSWORD=你的密码
+# 3. 按当前网站页面更新 selectors（招聘网站改版后 CSS selector 可能变化）。
+# 4. 首次执行：
+#      cd automation
+#      pip install -e ".[browser]"
+#      playwright install chromium
+#      python -m jobsinsight browser-login boss
+#
+# accounts.toml、浏览器 Cookie 与 storage_state 已被 .gitignore 排除。
+# 仅用于你有权访问的账号；遇到验证码时程序会停止，不会绕过安全验证。
+
+[accounts.boss]
+login_url = "https://www.zhipin.com/web/user/"
+username_env = "BOSS_USERNAME"
+password_env = "BOSS_PASSWORD"
+storage_state = "automation/state/browser/boss.json"
+
+[accounts.boss.selectors]
+# 以下是示例，不保证长期有效；请用浏览器开发者工具按实际页面调整。
+username = "input[type='tel'], input[name='phone']"
+password = "input[type='password']"
+submit = "button[type='submit']"
+logged_in = ".nav-figure, .user-nav"
+captcha = ".geetest_panel, .captcha, iframe[src*='captcha']"
+job_card = ".job-card-wrapper, .job-list-box li"
+source_id = "[data-jobid]"
+title = ".job-name, .job-title"
+company = ".company-name"
+city = ".job-area, .job-area-wrapper"
+salary = ".salary"
+experience = ".job-info .tag-list, .job-info"
+education = ".job-info"
+description = ".job-card-footer, .job-card-body"
+link = "a"
+publish_date = ".job-pub-time"
+
+# 可以继续增加：
+# [accounts.job51]
+# login_url = "https://login.51job.com/login.php"
+# username_env = "JOB51_USERNAME"
+# password_env = "JOB51_PASSWORD"
+# storage_state = "automation/state/browser/job51.json"
+#
+# [accounts.job51.selectors]
+# username = "..."
+# password = "..."
+# submit = "..."
+# captcha = "..."
+# job_card = "..."
+# title = "..."

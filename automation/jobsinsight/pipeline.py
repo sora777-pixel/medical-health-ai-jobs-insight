@@ -6,6 +6,8 @@ HTTP API share the same object and therefore the same run history.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import time
 from collections.abc import Mapping, Sequence
@@ -28,6 +30,7 @@ LOGGER = logging.getLogger(__name__)
 JOBS_FILE = "jobs.json"
 STATS_FILE = "stats.json"
 INSIGHTS_FILE = "insights.json"
+MANIFEST_FILE = "manifest.json"
 
 
 @dataclass
@@ -35,6 +38,7 @@ class RunReport:
     """Everything worth knowing about one run; persisted to the run history."""
 
     run_id: str
+    data_version: str = ""
     trigger: str = "manual"
     started_at: str = ""
     finished_at: str = ""
@@ -113,17 +117,21 @@ class Pipeline:
         report.diff = diff.as_dict()
 
         stats = analysis.build_stats(kept, diff)
+        stats["run_id"] = report.run_id
+        stats["generated_at"] = utc_now_iso()
+        report.data_version = _data_version(kept)
+        stats["data_version"] = report.data_version
         insights = self._build_insights(enricher, stats, kept, diff)
         report.insights_generated = insights.get("source") == "llm"
+        if report.errors:
+            report.status = "partial"
 
         if dry_run:
             LOGGER.info("dry-run：跳过写入，%d 个岗位已处理", len(kept))
         else:
-            report.outputs = [str(path) for path in self._write(kept, stats, insights)]
+            report.outputs = [str(path) for path in self._write(kept, stats, insights, report)]
             self.store.save_snapshot([job.as_dict() for job in kept])
 
-        if report.errors:
-            report.status = "partial"
         return self._finish(report, started, persist=not dry_run)
 
     # -------------------------------------------------------------- internals
@@ -197,14 +205,39 @@ class Pipeline:
             **generated,
         }
 
-    def _write(self, jobs: Sequence[Job], stats: Mapping[str, Any], insights: Mapping[str, Any]) -> list[Path]:
+    def _write(
+        self,
+        jobs: Sequence[Job],
+        stats: Mapping[str, Any],
+        insights: Mapping[str, Any],
+        report: RunReport,
+    ) -> list[Path]:
         data_dir = self.config.data_dir
+        insight_payload = {**insights, "run_id": report.run_id, "data_version": report.data_version}
         written = [
             write_json(data_dir / JOBS_FILE, [job.as_dict() for job in jobs]),
             write_json(data_dir / STATS_FILE, dict(stats)),
         ]
         if self.config.output.write_insights:
-            written.append(write_json(data_dir / INSIGHTS_FILE, dict(insights)))
+            written.append(write_json(data_dir / INSIGHTS_FILE, insight_payload))
+        files = [JOBS_FILE, STATS_FILE]
+        if self.config.output.write_insights:
+            files.append(INSIGHTS_FILE)
+        manifest = {
+            "schema_version": 1,
+            "run_id": report.run_id,
+            "data_version": report.data_version,
+            "generated_at": report.finished_at or utc_now_iso(),
+            "status": report.status,
+            "counts": {
+                "raw": report.collected,
+                "valid": report.kept,
+                "dropped": report.dropped_low_relevance,
+            },
+            "sources": report.sources,
+            "files": files,
+        }
+        written.append(write_json(data_dir / MANIFEST_FILE, manifest))
         return written
 
     def _finish(self, report: RunReport, started: float, *, persist: bool) -> RunReport:
@@ -233,3 +266,10 @@ class Pipeline:
 
 def _iso_or_empty(moment: datetime | None) -> str:
     return moment.isoformat(timespec="minutes") if moment else ""
+
+
+def _data_version(jobs: Sequence[Job]) -> str:
+    """Stable version for the exact dataset, independent of run timestamps."""
+
+    payload = json.dumps([job.as_dict() for job in jobs], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]

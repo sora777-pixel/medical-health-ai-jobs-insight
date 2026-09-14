@@ -215,7 +215,18 @@ def test_data_endpoints(client: Client):
     assert status == 200
     assert len(jobs) == 2
     assert client.get("/api/data/stats.json")[1]["total_jobs"] == 2
+    assert client.get("/api/data/manifest.json")[1]["counts"]["valid"] == 2
     assert client.get("/api/data/secrets.json")[0] == 404
+
+
+def test_live_data_path_reads_pipeline_output_instead_of_dist(client: Client):
+    """The SPA's /data URL must update without rebuilding web/dist."""
+
+    client.post("/api/runs", {})
+    status, jobs = client.get("/data/jobs.json")
+
+    assert status == 200
+    assert len(jobs) == 2
 
 
 def test_unknown_api_route_is_a_404(client: Client):
