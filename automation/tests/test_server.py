@@ -65,13 +65,19 @@ def client(service: AutomationService) -> Iterator[Client]:
 
 
 def test_health_and_status(client: Client):
-    assert client.get("/api/health") == (200, {"status": "ok", "running": False})
+    health_status, health = client.get("/api/health")
+    assert health_status == 200
+    assert health["status"] == "degraded"
+    assert health["running"] is False
+    assert health["data_valid_count"] == 0
 
     status, payload = client.get("/api/status")
     assert status == 200
     assert payload["schedule"]["description"] == "每天 00:00 (Asia/Shanghai)"
     assert payload["llm"]["provider"] == "mock"
     assert payload["last_run"] is None
+    assert payload["data"]["status"] == "unavailable"
+    assert "sources_health" in payload
 
 
 def test_config_endpoint_redacts_secrets(client: Client, config: Config):
@@ -149,7 +155,9 @@ def test_dry_run_through_the_api_writes_nothing(client: Client, config: Config):
 def test_async_run_is_accepted_immediately(client: Client):
     status, payload = client.post("/api/runs", {"async": True})
     assert status == 200
-    assert payload == {"accepted": True, "async": True}
+    assert payload["accepted"] is True
+    assert payload["async"] is True
+    assert payload["run_id"]
 
 
 def test_latest_run_before_any_run_is_a_404(client: Client):
@@ -215,7 +223,31 @@ def test_data_endpoints(client: Client):
     assert status == 200
     assert len(jobs) == 2
     assert client.get("/api/data/stats.json")[1]["total_jobs"] == 2
+    assert client.get("/api/data/manifest.json")[1]["counts"]["valid"] == 2
     assert client.get("/api/data/secrets.json")[0] == 404
+
+
+def test_health_and_doctor_reflect_published_data(client: Client):
+    client.post("/api/runs", {})
+
+    _, health = client.get("/api/health")
+    assert health["status"] == "ok"
+    assert health["data_valid_count"] == 2
+    assert health["data_version"]
+
+    status, doctor = client.get("/api/doctor")
+    assert status == 200
+    assert doctor["status"] == "ok"
+
+
+def test_live_data_path_reads_pipeline_output_instead_of_dist(client: Client):
+    """The SPA's /data URL must update without rebuilding web/dist."""
+
+    client.post("/api/runs", {})
+    status, jobs = client.get("/data/jobs.json")
+
+    assert status == 200
+    assert len(jobs) == 2
 
 
 def test_unknown_api_route_is_a_404(client: Client):

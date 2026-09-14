@@ -6,6 +6,8 @@ HTTP API share the same object and therefore the same run history.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import time
 from collections.abc import Mapping, Sequence
@@ -20,6 +22,7 @@ from .config import Config
 from .enrich import Enricher
 from .llm import LLMClient, LLMError, build_client
 from .models import Job, RawPosting, RunDiff
+from .quality import assess_jobs
 from .scheduler import next_run_after
 from .store import StateStore, utc_now_iso, write_json
 
@@ -28,6 +31,7 @@ LOGGER = logging.getLogger(__name__)
 JOBS_FILE = "jobs.json"
 STATS_FILE = "stats.json"
 INSIGHTS_FILE = "insights.json"
+MANIFEST_FILE = "manifest.json"
 
 
 @dataclass
@@ -35,6 +39,7 @@ class RunReport:
     """Everything worth knowing about one run; persisted to the run history."""
 
     run_id: str
+    data_version: str = ""
     trigger: str = "manual"
     started_at: str = ""
     finished_at: str = ""
@@ -47,6 +52,9 @@ class RunReport:
     sources: list[dict[str, Any]] = field(default_factory=list)
     llm: dict[str, Any] = field(default_factory=dict)
     insights_generated: bool = False
+    published: bool = False
+    quality: dict[str, Any] = field(default_factory=dict)
+    freshness: dict[str, Any] = field(default_factory=dict)
     dry_run: bool = False
     errors: list[str] = field(default_factory=list)
     outputs: list[str] = field(default_factory=list)
@@ -81,10 +89,17 @@ class Pipeline:
 
     # ------------------------------------------------------------------- run
 
-    def run(self, *, trigger: str = "manual", dry_run: bool = False, limit: int | None = None) -> RunReport:
+    def run(
+        self,
+        *,
+        trigger: str = "manual",
+        dry_run: bool = False,
+        limit: int | None = None,
+        run_id: str | None = None,
+    ) -> RunReport:
         started = time.monotonic()
         report = RunReport(
-            run_id=datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"),
+            run_id=run_id or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"),
             trigger=trigger,
             started_at=utc_now_iso(),
             dry_run=dry_run,
@@ -94,6 +109,12 @@ class Pipeline:
         report.sources = source_reports
         report.collected = len(postings)
         report.errors.extend(entry["error"] for entry in source_reports if entry.get("error"))
+
+        required_failures = [entry for entry in source_reports if entry.get("required") and entry.get("status") != "ok"]
+        if required_failures:
+            report.status = "failed"
+            report.errors.append("必需数据源未达到发布条件；保留上一版数据")
+            return self._finish(report, started, persist=not dry_run)
 
         if not postings:
             report.status = "failed" if report.errors else "skipped"
@@ -107,23 +128,44 @@ class Pipeline:
         kept, dropped = self._filter(jobs)
         report.kept = len(kept)
         report.dropped_low_relevance = dropped
+        if not kept:
+            report.status = "failed"
+            report.errors.append("所有岗位都被相关度过滤器丢弃；保留上一版数据，未写入空文件")
+            return self._finish(report, started, persist=not dry_run)
+
+        quality, freshness = assess_jobs(kept)
+        report.quality = quality.as_dict()
+        report.freshness = freshness.as_dict()
+        if quality.score < self.config.output.min_quality_score:
+            report.status = "failed"
+            report.errors.append(
+                f"数据质量分 {quality.score} 低于发布门槛 {self.config.output.min_quality_score}；保留上一版数据"
+            )
+            return self._finish(report, started, persist=not dry_run)
 
         previous = self.store.load_snapshot()
         diff = analysis.diff_jobs(previous, kept)
         report.diff = diff.as_dict()
 
         stats = analysis.build_stats(kept, diff)
+        stats["run_id"] = report.run_id
+        stats["generated_at"] = utc_now_iso()
+        report.data_version = _data_version(kept)
+        stats["data_version"] = report.data_version
+        stats["quality"] = report.quality
+        stats["freshness"] = report.freshness
         insights = self._build_insights(enricher, stats, kept, diff)
         report.insights_generated = insights.get("source") == "llm"
+        if report.errors:
+            report.status = "partial"
 
         if dry_run:
             LOGGER.info("dry-run：跳过写入，%d 个岗位已处理", len(kept))
         else:
-            report.outputs = [str(path) for path in self._write(kept, stats, insights)]
+            report.outputs = [str(path) for path in self._write(kept, stats, insights, report)]
             self.store.save_snapshot([job.as_dict() for job in kept])
+            report.published = True
 
-        if report.errors:
-            report.status = "partial"
         return self._finish(report, started, persist=not dry_run)
 
     # -------------------------------------------------------------- internals
@@ -135,18 +177,37 @@ class Pipeline:
         reports: list[dict[str, Any]] = []
 
         for source in self.config.enabled_sources:
-            entry: dict[str, Any] = {"name": source.name, "type": source.type, "collected": 0}
+            source_started = time.monotonic()
+            entry: dict[str, Any] = {
+                "name": source.name,
+                "type": source.type,
+                "required": source.required,
+                "min_collected": source.min_collected,
+                "collected": 0,
+                "items_before_dedupe": 0,
+                "status": "error",
+            }
             try:
                 collector = build_collector(source, context)
                 collected = list(collector.collect())
             except CollectorError as exc:
                 entry["error"] = f"来源 {source.name} 采集失败：{exc}"
                 LOGGER.warning("%s", entry["error"])
+                entry["duration_ms"] = round((time.monotonic() - source_started) * 1000)
                 reports.append(entry)
                 continue
             except Exception as exc:  # noqa: BLE001 - one bad source must not fail the run
                 entry["error"] = f"来源 {source.name} 异常：{exc}"
                 LOGGER.exception("来源 %s 异常", source.name)
+                entry["duration_ms"] = round((time.monotonic() - source_started) * 1000)
+                reports.append(entry)
+                continue
+
+            entry["items_before_dedupe"] = len(collected)
+            minimum = max(source.min_collected, 1 if source.required else 0)
+            if len(collected) < minimum:
+                entry["error"] = f"来源 {source.name} 仅采集 {len(collected)} 条，低于要求 {minimum}"
+                entry["duration_ms"] = round((time.monotonic() - source_started) * 1000)
                 reports.append(entry)
                 continue
 
@@ -159,8 +220,11 @@ class Pipeline:
                 postings.append(posting)
                 added += 1
             entry["collected"] = added
+            entry["status"] = "ok"
+            entry["duration_ms"] = round((time.monotonic() - source_started) * 1000)
             reports.append(entry)
 
+        self.store.update_sources_health(reports)
         cap = limit or self.config.output.max_jobs
         if cap and len(postings) > cap:
             postings = postings[:cap]
@@ -197,14 +261,42 @@ class Pipeline:
             **generated,
         }
 
-    def _write(self, jobs: Sequence[Job], stats: Mapping[str, Any], insights: Mapping[str, Any]) -> list[Path]:
+    def _write(
+        self,
+        jobs: Sequence[Job],
+        stats: Mapping[str, Any],
+        insights: Mapping[str, Any],
+        report: RunReport,
+    ) -> list[Path]:
         data_dir = self.config.data_dir
+        insight_payload = {**insights, "run_id": report.run_id, "data_version": report.data_version}
         written = [
             write_json(data_dir / JOBS_FILE, [job.as_dict() for job in jobs]),
             write_json(data_dir / STATS_FILE, dict(stats)),
         ]
         if self.config.output.write_insights:
-            written.append(write_json(data_dir / INSIGHTS_FILE, dict(insights)))
+            written.append(write_json(data_dir / INSIGHTS_FILE, insight_payload))
+        files = [JOBS_FILE, STATS_FILE]
+        if self.config.output.write_insights:
+            files.append(INSIGHTS_FILE)
+        files.append(MANIFEST_FILE)
+        manifest = {
+            "schema_version": 2,
+            "run_id": report.run_id,
+            "data_version": report.data_version,
+            "generated_at": report.finished_at or utc_now_iso(),
+            "status": report.status,
+            "counts": {
+                "raw": report.collected,
+                "valid": report.kept,
+                "dropped": report.dropped_low_relevance,
+            },
+            "sources": report.sources,
+            "quality": report.quality,
+            "freshness": report.freshness,
+            "files": files,
+        }
+        written.append(write_json(data_dir / MANIFEST_FILE, manifest))
         return written
 
     def _finish(self, report: RunReport, started: float, *, persist: bool) -> RunReport:
@@ -212,12 +304,19 @@ class Pipeline:
         report.duration_seconds = round(time.monotonic() - started, 3)
         if persist:
             self.store.append_run(report.as_dict(), keep=self.config.output.keep_runs)
-            self.store.update_state(
-                last_run_at=report.finished_at,
-                last_status=report.status,
-                last_run_id=report.run_id,
-                total_jobs=report.kept,
-            )
+            state: dict[str, Any] = {
+                "last_attempt_at": report.finished_at,
+                "last_status": report.status,
+                "last_run_id": report.run_id,
+                "last_published": report.published,
+            }
+            if report.published:
+                state.update(
+                    last_run_at=report.finished_at,
+                    last_published_at=report.finished_at,
+                    total_jobs=report.kept,
+                )
+            self.store.update_state(**state)
         LOGGER.info(
             "运行结束：status=%s 采集=%d 保留=%d 新增=%d 更新=%d 下架=%d 用时=%.1fs",
             report.status,
@@ -233,3 +332,10 @@ class Pipeline:
 
 def _iso_or_empty(moment: datetime | None) -> str:
     return moment.isoformat(timespec="minutes") if moment else ""
+
+
+def _data_version(jobs: Sequence[Job]) -> str:
+    """Stable version for the exact dataset, independent of run timestamps."""
+
+    payload = json.dumps([job.as_dict() for job in jobs], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]

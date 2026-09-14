@@ -53,9 +53,12 @@ jobs:
           # 在仓库 Settings → Secrets and variables → Actions 里配置，
           # 不配置也能跑：会自动退回规则解析。
           JOBSINSIGHT_LLM_API_KEY: ${{ secrets.JOBSINSIGHT_LLM_API_KEY }}
-          JOBSINSIGHT_LLM_PROVIDER: ${{ vars.JOBSINSIGHT_LLM_PROVIDER }}
-          JOBSINSIGHT_LLM_MODEL: ${{ vars.JOBSINSIGHT_LLM_MODEL }}
+          # GitHub 对未设置的 Variable 返回空字符串；显式给默认值，
+          # 避免空值覆盖 config.toml 里的 mock/mock-1。
+          JOBSINSIGHT_LLM_PROVIDER: ${{ vars.JOBSINSIGHT_LLM_PROVIDER || 'mock' }}
+          JOBSINSIGHT_LLM_MODEL: ${{ vars.JOBSINSIGHT_LLM_MODEL || 'mock-1' }}
         run: |
+          python -m jobsinsight doctor
           python -m jobsinsight next-runs
           python -m jobsinsight run \
             --trigger github-actions \
@@ -64,6 +67,16 @@ jobs:
 
       - name: 提交数据变更
         run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data = Path("web/public/data")
+          jobs = json.loads((data / "jobs.json").read_text(encoding="utf-8"))
+          manifest = json.loads((data / "manifest.json").read_text(encoding="utf-8"))
+          assert jobs, "拒绝提交空岗位列表"
+          assert manifest["counts"]["valid"] == len(jobs), "manifest 与 jobs.json 数量不一致"
+          print(f"数据校验通过：{len(jobs)} 条，版本 {manifest['data_version']}")
+          PY
           if [ -z "$(git status --porcelain web/public/data)" ]; then
             echo "数据没有变化，无需提交。"
             exit 0

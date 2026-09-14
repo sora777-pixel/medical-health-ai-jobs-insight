@@ -9,7 +9,9 @@ from jobsinsight.config import (
     Config,
     ConfigError,
     LLMSettings,
+    OutputSettings,
     ScheduleSettings,
+    SourceSettings,
     load_config,
     save_overrides,
 )
@@ -80,6 +82,20 @@ def test_environment_variables_override_the_file(tmp_path: Path, monkeypatch: py
     assert config.schedule.daily_times == ["06:00", "18:00"]
     assert config.llm.model == "gpt-from-env"
     assert config.server.port == 9001
+
+
+def test_empty_environment_variables_do_not_erase_file_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Unset Actions Variables arrive as empty strings, not absent variables."""
+
+    monkeypatch.setenv("JOBSINSIGHT_LLM_PROVIDER", "")
+    monkeypatch.setenv("JOBSINSIGHT_LLM_MODEL", "   ")
+    monkeypatch.setenv("JOBSINSIGHT_SCHEDULE_MODE", "")
+
+    config = load_config(write_config(tmp_path))
+
+    assert config.llm.provider == "deepseek"
+    assert config.llm.model == "deepseek-chat"
+    assert config.schedule.mode == "cron"
 
 
 def test_missing_env_placeholder_becomes_empty_with_a_default(tmp_path: Path):
@@ -155,3 +171,10 @@ def test_duplicate_source_names_are_rejected(tmp_path: Path):
     text = '[[sources]]\nname = "dup"\ntype = "fixture"\n\n[[sources]]\nname = "dup"\ntype = "fixture"\n'
     with pytest.raises(ConfigError, match="duplicate"):
         load_config(write_config(tmp_path, text))
+
+
+def test_invalid_source_minimum_and_quality_gate_are_rejected():
+    with pytest.raises(ConfigError, match="min_collected"):
+        Config(sources=[SourceSettings(name="bad", min_collected=-1)]).validate()
+    with pytest.raises(ConfigError, match="min_quality_score"):
+        Config(output=OutputSettings(min_quality_score=101)).validate()

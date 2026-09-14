@@ -40,6 +40,7 @@ def test_run_writes_every_data_file(config: Config):
     jobs = read(config.data_dir / "jobs.json")
     stats = read(config.data_dir / "stats.json")
     insights = read(config.data_dir / "insights.json")
+    manifest = read(config.data_dir / "manifest.json")
 
     assert [job["id"] for job in jobs] == [1, 2]
     assert {job["title"] for job in jobs} == {"高级医学影像算法工程师", "AI药物研发工程师"}
@@ -47,6 +48,11 @@ def test_run_writes_every_data_file(config: Config):
     assert stats["new_jobs_today"] == 2
     assert insights["schedule"]["description"] == "每天 00:00 (Asia/Shanghai)"
     assert insights["headline"]
+    assert manifest["run_id"] == report.run_id
+    assert manifest["data_version"] == report.data_version
+    assert manifest["counts"] == {"raw": 3, "valid": 2, "dropped": 1}
+    assert stats["data_version"] == report.data_version
+    assert insights["data_version"] == report.data_version
 
 
 def test_llm_enriched_fields_are_used(config: Config):
@@ -189,6 +195,54 @@ def test_limit_caps_the_number_of_postings(config: Config):
 def test_min_relevance_of_zero_keeps_off_topic_postings(config: Config):
     config.output.min_relevance = 0
     assert Pipeline(config).run().kept == 3
+
+
+def test_all_filtered_run_fails_without_overwriting_last_good_data(config: Config):
+    config.output.min_relevance = 100
+    config.data_dir.mkdir(parents=True)
+    sentinel = [{"title": "上一版有效岗位"}]
+    (config.data_dir / "jobs.json").write_text(json.dumps(sentinel), encoding="utf-8")
+
+    report = Pipeline(config).run()
+
+    assert report.status == "failed"
+    assert report.kept == 0
+    assert "保留上一版数据" in report.errors[0]
+    assert read(config.data_dir / "jobs.json") == sentinel
+
+
+def test_required_source_failure_preserves_data_and_success_timestamp(config: Config):
+    config.sources[0].required = True
+    config.sources[0].path = "missing.json"
+    config.data_dir.mkdir(parents=True)
+    sentinel = [{"title": "上一版有效岗位"}]
+    (config.data_dir / "jobs.json").write_text(json.dumps(sentinel), encoding="utf-8")
+
+    report = Pipeline(config).run()
+    state = Pipeline(config).store.load_state()
+    health = Pipeline(config).store.load_sources_health()
+
+    assert report.status == "failed"
+    assert report.published is False
+    assert "必需数据源" in report.errors[-1]
+    assert read(config.data_dir / "jobs.json") == sentinel
+    assert "last_run_at" not in state
+    assert state["last_published"] is False
+    assert health["sources"]["seed"]["consecutive_failures"] == 1
+
+
+def test_quality_gate_preserves_last_good_data(config: Config):
+    config.output.min_quality_score = 100
+    config.data_dir.mkdir(parents=True)
+    sentinel = [{"title": "上一版有效岗位"}]
+    (config.data_dir / "jobs.json").write_text(json.dumps(sentinel), encoding="utf-8")
+
+    report = Pipeline(config).run()
+
+    assert report.status == "failed"
+    assert report.quality["score"] < 100  # Fixture intentionally has no URLs.
+    assert "数据质量分" in report.errors[-1]
+    assert read(config.data_dir / "jobs.json") == sentinel
 
 
 def test_fixture_collector_filters_by_city_and_keyword(config: Config, seed_file: Path):

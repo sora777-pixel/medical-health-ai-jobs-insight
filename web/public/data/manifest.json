@@ -1,0 +1,51 @@
+{
+  "schema_version": 2,
+  "run_id": "20260914T115451Z",
+  "data_version": "b31552a175adfe6e",
+  "generated_at": "2026-09-14T11:54:51+00:00",
+  "status": "success",
+  "counts": {
+    "raw": 398,
+    "valid": 398,
+    "dropped": 0
+  },
+  "sources": [
+    {
+      "name": "seed",
+      "type": "fixture",
+      "required": false,
+      "min_collected": 0,
+      "collected": 398,
+      "items_before_dedupe": 420,
+      "status": "ok",
+      "duration_ms": 3
+    }
+  ],
+  "quality": {
+    "score": 75,
+    "total": 398,
+    "missing_company": 0,
+    "missing_salary": 0,
+    "missing_url": 398,
+    "missing_publish_date": 0,
+    "duplicate_fingerprints": 0,
+    "warnings": [
+      "岗位链接缺失 398/398（100%）",
+      "398 条岗位发布日期超过 30 天"
+    ]
+  },
+  "freshness": {
+    "newest_publish_date": "2026-02-19",
+    "oldest_publish_date": "2026-01-20",
+    "median_age_days": 222,
+    "stale_over_30d": 398,
+    "future_dated": 0,
+    "missing_publish_date": 0
+  },
+  "files": [
+    "jobs.json",
+    "stats.json",
+    "insights.json",
+    "manifest.json"
+  ]
+}

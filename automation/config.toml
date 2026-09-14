@@ -79,11 +79,14 @@ generate_insights = true       # 用 LLM 生成每日洞察
 # type = "fixture"  读取本地 JSON（离线可用，默认）
 # type = "json_api" 任意 JSON 接口，字段通过 options.field_map 映射
 # type = "html_llm" 抓网页 + 让 LLM 抽取结构化岗位
+# type = "browser"  用已授权的 Playwright 登录会话读取动态页面
 # ---------------------------------------------------------------------------
 [[sources]]
 name = "seed"
 type = "fixture"
 enabled = true
+# required = true              # 失败/空结果时拒绝发布，保留上一版数据
+# min_collected = 20           # 低于预期条数时视为来源失败
 path = "automation/data/seed_postings.json"
 limit = 500
 
@@ -114,6 +117,24 @@ limit = 500
 # [sources.options]
 # max_chars = 12000
 
+# 浏览器登录示例。先复制 config/accounts.example.toml 为 accounts.toml，
+# 安装 Playwright 并执行 `python -m jobsinsight browser-login boss`。
+# [[sources]]
+# name = "boss"
+# type = "browser"
+# enabled = false
+# platform = "BOSS直聘"
+# urls = ["https://www.zhipin.com/web/geek/job?query={keyword}&page={page}"]
+# keywords = ["医疗 AI", "药物研发 算法"]
+# timeout_seconds = 30
+# limit = 100
+#
+# [sources.options]
+# account = "boss"
+# pages = 3
+# settle_ms = 1500
+# slow_mo_ms = 250
+
 
 # ---------------------------------------------------------------------------
 # 产出
@@ -125,6 +146,7 @@ keep_runs = 50
 min_relevance = 30              # 相关度低于该值的岗位会被丢弃（0-100）
 max_jobs = 1000
 write_insights = true
+min_quality_score = 0          # 0 只记录质量；生产可设 60，低于门槛拒绝发布
 
 
 # ---------------------------------------------------------------------------

@@ -26,6 +26,7 @@
 ```bash
 # 1. 跑一次流水线（默认离线 mock provider，不需要 API Key）
 cd automation
+python -m jobsinsight doctor  # 先检查配置、来源、目录和已有数据
 python -m jobsinsight run
 
 # 2. 看看下一次什么时候跑
@@ -133,10 +134,20 @@ register_provider("my-gateway", lambda options: MyProvider(**options))
 | `fixture` | 读本地 JSON（默认，离线可用；也用来回放已保存的抓取结果） |
 | `json_api` | 任意 JSON 接口，字段通过 `options.field_map` 映射，支持分页与 Cookie |
 | `html_llm` | 抓网页转成纯文本，交给 LLM 抽取结构化岗位 |
+| `browser` | 可选 Playwright；使用你授权的账号或已保存会话读取动态页面 |
 
 51job / Boss直聘 / 猎聘 的搜索接口地址、参数与 Cookie 因账号而异且会变，
 所以**不写死在代码里**，而是放在配置中（`automation/config.toml` 里有注释掉的示例）。
 仓库默认使用 `automation/data/seed_postings.json` 作为示例数据源，开箱即可跑通。
+
+需要登录的网站可复制 `automation/config/accounts.example.toml` 为
+`accounts.toml`，账号密码通过环境变量传入，再执行
+`python -m jobsinsight browser-login <账号名>` 人工完成首次登录。私密配置和浏览器
+Cookie 均被 Git 忽略。该采集器不会规避验证码、风控或平台访问限制；请遵守平台条款。
+
+生产来源建议设置 `required = true` 和合理的 `min_collected`。必需来源失败、采集量
+异常或数据质量低于 `output.min_quality_score` 时，流水线会保留上一版有效数据，
+并把连续失败次数写入 `automation/state/sources_health.json`。
 
 ## HTTP 控制接口
 
@@ -165,6 +176,11 @@ register_provider("my-gateway", lambda options: MyProvider(**options))
 - `jobs.json` —— 规范化后的岗位列表
 - `stats.json` —— 平台/城市/技能/经验/学历/级别/方向/薪资分布等聚合结果，含今日新增、更新、下架
 - `insights.json` —— 每日洞察（模型撰写或统计规则生成）+ 运行时间与上次运行信息
+- `manifest.json` —— 本轮 run ID、数据版本、有效条数、来源与文件清单
+
+`manifest.json` 同时包含 `quality`（0–100 分、缺失字段与警告）和 `freshness`
+（最新/最旧发布日期、中位数据年龄、过期数量）。前端状态条会显示这些信息；
+`/api/health`、`/api/status` 和 `/api/doctor` 可供监控系统读取。
 
 运行状态在 `automation/state/`（不入库）：`state.json`（上次运行时间）、`runs.json`（运行历史）、
 `jobs_snapshot.json`（用于算增量）、`overrides.json`（运行时改过的配置）。

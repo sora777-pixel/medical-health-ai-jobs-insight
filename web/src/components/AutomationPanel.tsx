@@ -14,7 +14,7 @@ import {
   TrendingUp,
 } from 'lucide-react'
 
-import { formatMoment, type ScheduleMode, type ScheduleUpdate } from '@/lib/automation'
+import { formatMoment, type DataManifest, type ScheduleMode, type ScheduleUpdate } from '@/lib/automation'
 import type { UseAutomation } from '@/hooks/useAutomation'
 
 const MODE_LABELS: Record<ScheduleMode, string> = {
@@ -33,17 +33,21 @@ const RUN_STATUS_STYLES: Record<string, { label: string; className: string }> = 
 
 interface Props {
   automation: UseAutomation
+  manifest?: DataManifest | null
 }
 
 /**
  * 自动化面板：展示运行时间、上一次运行结果与 LLM 洞察，
  * 在控制接口可用时还能直接触发运行、修改运行时间。
  */
-export function AutomationPanel({ automation }: Props) {
+export function AutomationPanel({ automation, manifest }: Props) {
   const { insights, status, online, running, error, lastRun, runNow, changeSchedule } = automation
   const schedule = status?.schedule
   const scheduleText = schedule?.description ?? insights?.schedule?.description ?? '未配置'
   const nextRun = schedule?.next_runs?.[0] ?? insights?.schedule?.next_run
+  const sourceRuns = status?.data?.manifest?.sources ?? manifest?.sources ?? []
+  const failedSources = sourceRuns.filter((source) => source.status === 'error')
+  const collected = sourceRuns.reduce((total, source) => total + source.collected, 0)
 
   if (!insights && !online) return null
 
@@ -139,11 +143,13 @@ export function AutomationPanel({ automation }: Props) {
                 icon={<Database className="w-4 h-4" />}
                 label="数据源"
                 value={
-                  status
+                  sourceRuns.length
+                    ? `${sourceRuns.length - failedSources.length} 正常 / ${failedSources.length} 失败`
+                    : status
                     ? `${status.sources.filter((source) => source.enabled).length} / ${status.sources.length} 启用`
                     : '按配置采集'
                 }
-                hint={status?.sources.map((source) => source.name).join('、')}
+                hint={sourceRuns.length ? `本轮采集 ${collected} 条` : status?.sources.map((source) => source.name).join('、')}
               />
             </div>
 
@@ -153,6 +159,17 @@ export function AutomationPanel({ automation }: Props) {
                 <div className="space-y-1">
                   {lastRun.errors.slice(0, 3).map((message) => (
                     <div key={message}>{message}</div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {!lastRun?.errors?.length && failedSources.length > 0 ? (
+              <div className="flex items-start gap-2 p-3 rounded-lg bg-[#F5B935]/10 border border-[#F5B935]/30 text-sm text-[#F5B935]">
+                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                <div className="space-y-1">
+                  {failedSources.slice(0, 3).map((source) => (
+                    <div key={source.name}>{source.error || `${source.name} 采集失败`}</div>
                   ))}
                 </div>
               </div>

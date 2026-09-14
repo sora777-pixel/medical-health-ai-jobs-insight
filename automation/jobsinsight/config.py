@@ -165,6 +165,9 @@ class SourceSettings:
     name: str = "fixture"
     type: str = "fixture"
     enabled: bool = True
+    #: 发布所必需的来源。失败或低于 min_collected 时保留上一版数据。
+    required: bool = False
+    min_collected: int = 0
     platform: str = ""
     path: str = ""
     urls: list[str] = field(default_factory=list)
@@ -180,6 +183,8 @@ class SourceSettings:
             raise ConfigError("sources[].name must not be empty")
         if not self.type:
             raise ConfigError(f"sources[{self.name}].type must not be empty")
+        if self.min_collected < 0:
+            raise ConfigError(f"sources[{self.name}].min_collected must be >= 0")
 
 
 @dataclass
@@ -193,12 +198,16 @@ class OutputSettings:
     min_relevance: int = 30
     max_jobs: int = 1000
     write_insights: bool = True
+    #: 低于此质量分时拒绝覆盖上一版数据；0 表示只记录、不拦截。
+    min_quality_score: int = 0
 
     def validate(self) -> None:
         if not 0 <= self.min_relevance <= 100:
             raise ConfigError("output.min_relevance must be between 0 and 100")
         if self.keep_runs < 1:
             raise ConfigError("output.keep_runs must be >= 1")
+        if not 0 <= self.min_quality_score <= 100:
+            raise ConfigError("output.min_quality_score must be between 0 and 100")
 
 
 @dataclass
@@ -440,7 +449,12 @@ def _env_overrides() -> dict[str, Any]:
     overrides: dict[str, Any] = {}
     for suffix, path in ENV_MAP.items():
         value = os.environ.get(ENV_PREFIX + suffix)
-        if value is None:
+        # GitHub Actions turns an unset repository Variable into an empty
+        # environment variable. Treat whitespace-only values as "not set" so
+        # they cannot erase a valid provider/model from config.toml. An API
+        # key may intentionally be empty; omitting that override has the same
+        # effective result because the file placeholder already resolves it.
+        if value is None or not value.strip():
             continue
         cursor: MutableMapping[str, Any] = overrides
         for key in path[:-1]:

@@ -51,7 +51,7 @@ SCHEDULE_FIELDS = (
     "run_on_start",
 )
 
-DATA_FILES = ("jobs", "stats", "insights", "headhunters", "agencies")
+DATA_FILES = ("jobs", "stats", "insights", "manifest", "headhunters", "agencies")
 
 
 class ApiError(Exception):
@@ -70,6 +70,7 @@ class AutomationService:
         self.scheduler = scheduler
         self._run_lock = threading.Lock()
         self._running = False
+        self._current_run_id: str | None = None
 
     # ------------------------------------------------------------------ runs
 
@@ -78,30 +79,47 @@ class AutomationService:
         return self._running
 
     def trigger_run(self, *, trigger: str = "api", dry_run: bool = False, limit: int | None = None) -> dict[str, Any]:
-        if not self._run_lock.acquire(blocking=False):
-            raise ApiError(HTTPStatus.CONFLICT, "已有运行在进行中")
-        self._running = True
+        run_id = self._reserve_run()
         try:
-            report = self.pipeline.run(trigger=trigger, dry_run=dry_run, limit=limit)
+            report = self.pipeline.run(trigger=trigger, dry_run=dry_run, limit=limit, run_id=run_id)
         finally:
-            self._running = False
-            self._run_lock.release()
-        if self.scheduler is not None:
+            self._release_run()
+        if self.scheduler is not None and report.published:
             self.scheduler.last_run_at = datetime.now(UTC)
         return report.as_dict()
 
     def trigger_run_async(self, **kwargs: Any) -> dict[str, Any]:
-        if self._running:
-            raise ApiError(HTTPStatus.CONFLICT, "已有运行在进行中")
-        thread = threading.Thread(target=self._run_quietly, kwargs=kwargs, daemon=True, name="jobsinsight-run")
+        run_id = self._reserve_run()
+        thread = threading.Thread(
+            target=self._run_reserved_quietly,
+            kwargs={**kwargs, "run_id": run_id},
+            daemon=True,
+            name=f"jobsinsight-{run_id}",
+        )
         thread.start()
-        return {"accepted": True, "async": True}
+        return {"accepted": True, "async": True, "run_id": run_id}
 
-    def _run_quietly(self, **kwargs: Any) -> None:
+    def _run_reserved_quietly(self, **kwargs: Any) -> None:
         try:
-            self.trigger_run(**kwargs)
+            report = self.pipeline.run(**kwargs)
+            if self.scheduler is not None and report.published:
+                self.scheduler.last_run_at = datetime.now(UTC)
         except Exception:  # noqa: BLE001 - background run must not crash the server
             LOGGER.exception("后台运行失败")
+        finally:
+            self._release_run()
+
+    def _reserve_run(self) -> str:
+        if self._running or not self._run_lock.acquire(blocking=False):
+            raise ApiError(HTTPStatus.CONFLICT, "已有运行在进行中")
+        self._running = True
+        self._current_run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        return self._current_run_id
+
+    def _release_run(self) -> None:
+        self._running = False
+        self._current_run_id = None
+        self._run_lock.release()
 
     # -------------------------------------------------------------- schedule
 
@@ -143,6 +161,7 @@ class AutomationService:
         return {
             "now": datetime.now(UTC).isoformat(timespec="seconds"),
             "running": self._running,
+            "current_run_id": self._current_run_id,
             "scheduler_active": self.scheduler is not None and not self.scheduler.stopped,
             "schedule": self.schedule_payload(),
             "llm": {
@@ -157,7 +176,52 @@ class AutomationService:
             "last_run": history[-1] if history else None,
             "state": state,
             "data_dir": str(self.config.data_dir),
+            "data": self.data_status_payload(),
+            "sources_health": self.pipeline.store.load_sources_health(),
         }
+
+    def data_status_payload(self) -> dict[str, Any]:
+        manifest = read_json(self.config.data_dir / "manifest.json", {}) or {}
+        generated_at = manifest.get("generated_at")
+        age_hours: float | None = None
+        if isinstance(generated_at, str):
+            try:
+                moment = datetime.fromisoformat(generated_at)
+                moment = moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+                age_hours = round(max(0.0, (datetime.now(UTC) - moment).total_seconds() / 3600), 1)
+            except ValueError:
+                pass
+        quality = manifest.get("quality") if isinstance(manifest, dict) else {}
+        status = "ok"
+        if not manifest:
+            status = "unavailable"
+        elif manifest.get("status") != "success" or (isinstance(quality, dict) and quality.get("score", 100) < 60):
+            status = "degraded"
+        return {
+            "status": status,
+            "age_hours": age_hours,
+            "manifest": manifest,
+        }
+
+    def health_payload(self) -> dict[str, Any]:
+        data = self.data_status_payload()
+        state = self.pipeline.store.load_state()
+        degraded = data["status"] != "ok" or state.get("last_status") in ("partial", "failed")
+        manifest = data.get("manifest") or {}
+        return {
+            "status": "degraded" if degraded else "ok",
+            "running": self.running,
+            "current_run_id": self._current_run_id,
+            "last_run_status": state.get("last_status"),
+            "data_valid_count": (manifest.get("counts") or {}).get("valid", 0),
+            "data_version": manifest.get("data_version", ""),
+            "data_age_hours": data.get("age_hours"),
+        }
+
+    def doctor_payload(self) -> dict[str, Any]:
+        from .diagnostics import run_doctor, summary
+
+        return summary(run_doctor(self.config))
 
     # ------------------------------------------------------------------- llm
 
@@ -271,7 +335,8 @@ def make_handler(service: AutomationService) -> type[BaseHTTPRequestHandler]:
         def do_GET(self) -> None:  # noqa: N802 - http.server API
             path = urlparse(self.path).path.rstrip("/") or "/"
             routes: dict[str, Callable[[], Any]] = {
-                "/api/health": lambda: {"status": "ok", "running": service.running},
+                "/api/health": service.health_payload,
+                "/api/doctor": service.doctor_payload,
                 "/api/status": service.status_payload,
                 "/api/config": lambda: config.as_dict(),
                 "/api/schedule": service.schedule_payload,
@@ -282,6 +347,13 @@ def make_handler(service: AutomationService) -> type[BaseHTTPRequestHandler]:
                 self._guard(routes[path])
                 return
             if path.startswith("/api/data/"):
+                name = path.rsplit("/", 1)[-1].removesuffix(".json")
+                self._guard(lambda: service.data_file(name))
+                return
+            # In service/Docker mode the pipeline writes web/public/data after
+            # the frontend was built. Serve these live files ahead of dist so
+            # `/data/*.json` changes immediately without rebuilding the SPA.
+            if path.startswith("/data/"):
                 name = path.rsplit("/", 1)[-1].removesuffix(".json")
                 self._guard(lambda: service.data_file(name))
                 return
@@ -371,6 +443,8 @@ def make_handler(service: AutomationService) -> type[BaseHTTPRequestHandler]:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
+            if content_type.startswith("application/json"):
+                self.send_header("Cache-Control", "no-store")
             # Idle keep-alive sockets that this single-purpose server later drops
             # surface as spurious 408s in the browser console, so close each one.
             self.send_header("Connection", "close")

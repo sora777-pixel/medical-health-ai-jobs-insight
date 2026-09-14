@@ -11,7 +11,15 @@ import {
   Search, X, AlertCircle, ExternalLink
 } from 'lucide-react'
 import { AutomationPanel } from '@/components/AutomationPanel'
+import { DataStatusBar } from '@/components/DataStatusBar'
 import { useAutomation } from '@/hooks/useAutomation'
+import {
+  fetchDataFile,
+  fetchDataFileWithMeta,
+  fetchManifest,
+  type DataManifest,
+  type DataOrigin,
+} from '@/lib/automation'
 import './App.css'
 
 // 类型定义
@@ -156,6 +164,9 @@ function App() {
   const [headhunters, setHeadhunters] = useState<Headhunter[]>([])
   const [agencies, setAgencies] = useState<Agency[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [manifest, setManifest] = useState<DataManifest | null>(null)
+  const [dataOrigin, setDataOrigin] = useState<DataOrigin | null>(null)
   const [isUpdating, setIsUpdating] = useState(false)
   
   // 筛选状态
@@ -178,13 +189,16 @@ function App() {
   const automation = useAutomation()
 
   const loadData = useCallback(async () => {
-    const [jobsData, statsData] = await Promise.all([
-      fetch('/data/jobs.json', { cache: 'no-store' }).then(r => r.json()),
-      fetch('/data/stats.json', { cache: 'no-store' }).then(r => r.json())
+    const [jobsResult, statsResult, manifestResult] = await Promise.all([
+      fetchDataFileWithMeta<Job[]>('jobs'),
+      fetchDataFileWithMeta<Stats>('stats'),
+      fetchManifest(),
     ])
-    setJobs(jobsData)
-    setStats(statsData)
-    return { jobs: jobsData as Job[], stats: statsData as Stats }
+    setJobs(jobsResult.data)
+    setStats(statsResult.data)
+    setManifest(manifestResult?.data ?? null)
+    setDataOrigin(jobsResult.origin)
+    return { jobs: jobsResult.data, stats: statsResult.data }
   }, [])
 
   // 更新按钮：接口在线时触发后台流水线跑一次，否则只重新拉取已产出的数据
@@ -196,9 +210,12 @@ function App() {
       if (automation.online) {
         const report = await automation.runNow()
         if (!report) throw new Error(automation.error ?? '运行失败')
+        if (report.published === false || report.status === 'failed') {
+          throw new Error(report.errors?.[0] ?? '数据未通过发布门禁，已保留上一版数据')
+        }
         await loadData()
         setUpdateResult(
-          `更新完成！新增 ${report.diff?.new_jobs ?? 0} 个岗位，更新 ${report.diff?.updated_jobs ?? 0} 个，下架 ${report.diff?.deleted_jobs ?? 0} 个`
+          `${report.status === 'partial' ? '部分来源失败，已发布可用数据。' : '更新完成！'}新增 ${report.diff?.new_jobs ?? 0} 个岗位，更新 ${report.diff?.updated_jobs ?? 0} 个，下架 ${report.diff?.deleted_jobs ?? 0} 个`
         )
       } else {
         const { stats: latest } = await loadData()
@@ -216,16 +233,30 @@ function App() {
   }
 
   useEffect(() => {
-    // 加载数据
-    Promise.all([
-      loadData(),
-      fetch('/data/headhunters.json').then(r => r.json()),
-      fetch('/data/agencies.json').then(r => r.json())
-    ]).then(([, headhuntersData, agenciesData]) => {
-      setHeadhunters(headhuntersData)
-      setAgencies(agenciesData)
-      setLoading(false)
-    })
+    let active = true
+    const initialize = async () => {
+      setLoading(true)
+      setLoadError('')
+      try {
+        await loadData()
+        // 猎头与机构是非关键内容，失败不能阻塞整个岗位看板。
+        const [headhuntersResult, agenciesResult] = await Promise.allSettled([
+          fetchDataFile<Headhunter[]>('headhunters'),
+          fetchDataFile<Agency[]>('agencies')
+        ])
+        if (!active) return
+        if (headhuntersResult.status === 'fulfilled') setHeadhunters(headhuntersResult.value)
+        if (agenciesResult.status === 'fulfilled') setAgencies(agenciesResult.value)
+      } catch (error) {
+        if (active) setLoadError(error instanceof Error ? error.message : '数据加载失败')
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+    void initialize()
+    return () => {
+      active = false
+    }
   }, [loadData])
 
   // 去重函数：同一公司相同岗位只保留最新发布的
@@ -310,7 +341,7 @@ function App() {
     return filtered
   }, [jobs, selectedPlatform, selectedCity, selectedExperience, selectedEducation, selectedJobLevel, searchSummary, sortBy, sortOrder])
 
-  if (loading || !stats) {
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#0A1628] to-[#1B45F4]">
         <motion.div 
@@ -318,6 +349,27 @@ function App() {
           transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
           className="w-16 h-16 border-4 border-white border-t-transparent rounded-full"
         />
+      </div>
+    )
+  }
+
+  if (loadError || !stats) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#0A1628] to-[#1B45F4] px-4 text-white">
+        <div className="max-w-xl w-full rounded-2xl bg-[#0A1628]/80 border border-white/20 p-8 text-center shadow-2xl">
+          <AlertCircle className="w-12 h-12 text-[#FF6B6B] mx-auto mb-4" />
+          <h1 className="text-2xl font-bold mb-3">岗位数据加载失败</h1>
+          <p className="text-white/70 text-sm break-words mb-6">{loadError || 'stats.json 不存在或格式无效'}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-5 py-2.5 rounded-lg bg-[#1B45F4] hover:bg-[#4D6CFA] transition-colors"
+          >
+            重新加载
+          </button>
+          <p className="text-white/40 text-xs mt-4">
+            可在 automation 目录执行 python -m jobsinsight doctor 查看具体原因
+          </p>
+        </div>
       </div>
     )
   }
@@ -438,7 +490,7 @@ function App() {
             className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 mb-6"
           >
             <Activity className="w-4 h-4 text-[#F5B935]" />
-            <span className="text-sm">实时数据更新</span>
+            <span className="text-sm">{dataOrigin === 'api' ? '实时 API 数据' : '定时更新数据快照'}</span>
           </motion.div>
 
           <motion.h1
@@ -545,8 +597,10 @@ function App() {
         </motion.div>
       </section>
 
+      <DataStatusBar manifest={manifest} origin={dataOrigin} />
+
       {/* 自动化运行状态与 LLM 洞察 */}
-      <AutomationPanel automation={automation} />
+      <AutomationPanel automation={automation} manifest={manifest} />
 
       {/* 平台生态概览 */}
       <section className="py-20 px-4">

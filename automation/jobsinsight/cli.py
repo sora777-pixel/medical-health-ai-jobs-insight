@@ -6,6 +6,8 @@ serve        启动 HTTP 接口（默认同时带调度器）
 next-runs    打印未来若干次触发时刻
 set-schedule 修改运行时间（写入 state/overrides.json）
 config       校验并打印当前配置
+doctor       运行环境、数据源、输出与前端预检
+browser-login 打开可见浏览器，人工登录并保存会话
 llm          直接调用 LLM，用于验证接口连通性
 sync-cron    把运行时间同步进 GitHub Actions workflow
 """
@@ -68,6 +70,18 @@ def build_parser() -> argparse.ArgumentParser:
     config_cmd = sub.add_parser("config", help="校验并打印配置")
     config_cmd.add_argument("--raw", action="store_true", help="不脱敏（会打印 API Key）")
 
+    doctor = sub.add_parser("doctor", help="诊断无法产出或展示数据的常见原因")
+    doctor.add_argument("--json", action="store_true", help="输出机器可读 JSON")
+    doctor.add_argument("--strict", action="store_true", help="把警告也视为失败（生产部署检查）")
+
+    browser_login = sub.add_parser("browser-login", help="人工登录招聘网站并保存浏览器会话")
+    browser_login.add_argument("account", help="accounts.toml 中的账号名称")
+    browser_login.add_argument(
+        "--accounts-file",
+        default="automation/config/accounts.toml",
+        help="私密账号配置路径（相对项目根目录）",
+    )
+
     llm = sub.add_parser("llm", help="直接调用 LLM，验证接口是否可用")
     llm.add_argument("prompt", nargs="?", default="用一句话说明医药健康+AI 岗位市场的现状。")
     llm.add_argument("--json", dest="json_mode", action="store_true", help="要求返回 JSON")
@@ -107,6 +121,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "next-runs": _cmd_next_runs,
         "set-schedule": _cmd_set_schedule,
         "config": _cmd_config,
+        "doctor": _cmd_doctor,
+        "browser-login": _cmd_browser_login,
         "llm": _cmd_llm,
         "sync-cron": _cmd_sync_cron,
         "history": _cmd_history,
@@ -208,6 +224,36 @@ def _cmd_set_schedule(config: Config, args: argparse.Namespace) -> int:
 def _cmd_config(config: Config, args: argparse.Namespace) -> int:
     print(f"# 配置文件: {config.config_path or '（未找到，使用默认值）'}")
     print(json.dumps(config.as_dict(redact=not args.raw), ensure_ascii=False, indent=2))
+    return 0
+
+
+def _cmd_doctor(config: Config, args: argparse.Namespace) -> int:
+    from .diagnostics import has_errors, run_doctor, summary
+
+    checks = run_doctor(config)
+    if args.json:
+        print(json.dumps(summary(checks), ensure_ascii=False, indent=2))
+    else:
+        icons = {"ok": "✓", "warning": "!", "error": "✗"}
+        for check in checks:
+            print(f"{icons[check.level]} {check.name}: {check.message}")
+            if check.hint:
+                print(f"    建议：{check.hint}")
+        counts = summary(checks)["counts"]
+        print(f"\n诊断完成：{counts['ok']} 正常，{counts['warning']} 警告，{counts['error']} 错误")
+    return 1 if has_errors(checks) or (args.strict and any(check.level == "warning" for check in checks)) else 0
+
+
+def _cmd_browser_login(config: Config, args: argparse.Namespace) -> int:
+    from .collectors.base import CollectorError
+    from .collectors.browser import save_interactive_session
+
+    try:
+        path = save_interactive_session(config.project_root, args.account, args.accounts_file)
+    except (ConfigError, CollectorError) as exc:
+        print(f"浏览器登录失败: {exc}", file=sys.stderr)
+        return 2
+    print(f"登录会话已保存：{path}")
     return 0
 
 
