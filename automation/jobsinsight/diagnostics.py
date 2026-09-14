@@ -7,6 +7,7 @@ import json
 import os
 import sys
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -39,6 +40,8 @@ def run_doctor(config: Config) -> list[Check]:
     ]
     checks.extend(_source_checks(config))
     checks.extend(_data_checks(config))
+    checks.extend(_manifest_checks(config))
+    checks.extend(_source_health_checks(config))
     return checks
 
 
@@ -178,3 +181,54 @@ def _data_checks(config: Config) -> list[Check]:
             size = len(payload) if hasattr(payload, "__len__") else 0
             checks.append(Check(f"data:{name}", "ok", f"{path.name} 可读（{size} 项）"))
     return checks
+
+
+def _manifest_checks(config: Config) -> list[Check]:
+    path = config.data_dir / "manifest.json"
+    if not path.is_file():
+        return [Check("manifest", "warning", "manifest.json 不存在", "执行 python -m jobsinsight run")]
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [Check("manifest", "error", f"manifest.json 无效：{exc}")]
+    checks: list[Check] = []
+    valid = (manifest.get("counts") or {}).get("valid")
+    jobs = config.data_dir / "jobs.json"
+    try:
+        actual = len(json.loads(jobs.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError, TypeError):
+        actual = None
+    if actual is not None and valid != actual:
+        checks.append(Check("manifest:count", "error", f"manifest={valid}，jobs.json={actual}，数据版本不一致"))
+    else:
+        checks.append(Check("manifest:count", "ok", f"数据清单与 jobs.json 一致：{valid} 条"))
+
+    generated_at = manifest.get("generated_at")
+    try:
+        moment = datetime.fromisoformat(str(generated_at))
+        moment = moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+        age_hours = max(0.0, (datetime.now(UTC) - moment).total_seconds() / 3600)
+        level: Level = "warning" if age_hours > 48 else "ok"
+        checks.append(Check("manifest:freshness", level, f"数据产出于 {age_hours:.1f} 小时前"))
+    except ValueError:
+        checks.append(Check("manifest:freshness", "error", f"generated_at 无效：{generated_at!r}"))
+
+    quality = manifest.get("quality")
+    if isinstance(quality, dict):
+        score = int(quality.get("score") or 0)
+        level = "warning" if score < 60 else "ok"
+        checks.append(Check("manifest:quality", level, f"数据质量分：{score}/100"))
+    return checks
+
+
+def _source_health_checks(config: Config) -> list[Check]:
+    from .store import StateStore
+
+    health = StateStore(config.state_dir).load_sources_health()
+    sources = health.get("sources") if isinstance(health, dict) else None
+    if not isinstance(sources, dict) or not sources:
+        return [Check("source-health", "warning", "尚无来源健康历史，至少运行一次流水线")]
+    failed = [name for name, value in sources.items() if isinstance(value, dict) and value.get("last_status") != "ok"]
+    if failed:
+        return [Check("source-health", "warning", f"最近失败来源：{', '.join(sorted(failed))}")]
+    return [Check("source-health", "ok", f"{len(sources)} 个来源最近采集正常")]

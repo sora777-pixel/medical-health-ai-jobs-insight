@@ -72,6 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = sub.add_parser("doctor", help="诊断无法产出或展示数据的常见原因")
     doctor.add_argument("--json", action="store_true", help="输出机器可读 JSON")
+    doctor.add_argument("--strict", action="store_true", help="把警告也视为失败（生产部署检查）")
 
     browser_login = sub.add_parser("browser-login", help="人工登录招聘网站并保存浏览器会话")
     browser_login.add_argument("account", help="accounts.toml 中的账号名称")
@@ -240,7 +241,7 @@ def _cmd_doctor(config: Config, args: argparse.Namespace) -> int:
                 print(f"    建议：{check.hint}")
         counts = summary(checks)["counts"]
         print(f"\n诊断完成：{counts['ok']} 正常，{counts['warning']} 警告，{counts['error']} 错误")
-    return 1 if has_errors(checks) else 0
+    return 1 if has_errors(checks) or (args.strict and any(check.level == "warning" for check in checks)) else 0
 
 
 def _cmd_browser_login(config: Config, args: argparse.Namespace) -> int:

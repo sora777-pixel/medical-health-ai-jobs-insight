@@ -85,6 +85,8 @@ generate_insights = true       # 用 LLM 生成每日洞察
 name = "seed"
 type = "fixture"
 enabled = true
+# required = true              # 失败/空结果时拒绝发布，保留上一版数据
+# min_collected = 20           # 低于预期条数时视为来源失败
 path = "automation/data/seed_postings.json"
 limit = 500
 
@@ -144,6 +146,7 @@ keep_runs = 50
 min_relevance = 30              # 相关度低于该值的岗位会被丢弃（0-100）
 max_jobs = 1000
 write_insights = true
+min_quality_score = 0          # 0 只记录质量；生产可设 60，低于门槛拒绝发布
 
 
 # ---------------------------------------------------------------------------

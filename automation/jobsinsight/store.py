@@ -13,6 +13,7 @@ from typing import Any
 STATE_FILE = "state.json"
 HISTORY_FILE = "runs.json"
 SNAPSHOT_FILE = "jobs_snapshot.json"
+SOURCES_HEALTH_FILE = "sources_health.json"
 
 
 def utc_now_iso() -> str:
@@ -64,6 +65,10 @@ class StateStore:
     def snapshot_path(self) -> Path:
         return self.state_dir / SNAPSHOT_FILE
 
+    @property
+    def sources_health_path(self) -> Path:
+        return self.state_dir / SOURCES_HEALTH_FILE
+
     # ------------------------------------------------------------------ state
 
     def load_state(self) -> dict[str, Any]:
@@ -107,3 +112,42 @@ class StateStore:
 
     def save_snapshot(self, jobs: list[Mapping[str, Any]]) -> None:
         write_json(self.snapshot_path, [dict(job) for job in jobs])
+
+    # --------------------------------------------------------- source health
+
+    def load_sources_health(self) -> dict[str, Any]:
+        payload = read_json(self.sources_health_path, {}) or {}
+        return payload if isinstance(payload, dict) else {}
+
+    def update_sources_health(self, reports: list[Mapping[str, Any]]) -> dict[str, Any]:
+        now = utc_now_iso()
+        payload = self.load_sources_health()
+        sources = payload.get("sources")
+        sources = sources if isinstance(sources, dict) else {}
+        for report in reports:
+            name = str(report.get("name") or "unknown")
+            previous = sources.get(name)
+            entry = dict(previous) if isinstance(previous, dict) else {}
+            ok = report.get("status") == "ok"
+            entry.update(
+                {
+                    "type": str(report.get("type") or ""),
+                    "required": bool(report.get("required")),
+                    "last_attempt_at": now,
+                    "last_status": "ok" if ok else "error",
+                    "last_collected": int(report.get("collected") or 0),
+                    "last_duration_ms": int(report.get("duration_ms") or 0),
+                }
+            )
+            if ok:
+                entry["last_success_at"] = now
+                entry["consecutive_failures"] = 0
+                entry["last_error"] = ""
+            else:
+                entry["last_error_at"] = now
+                entry["last_error"] = str(report.get("error") or "unknown error")
+                entry["consecutive_failures"] = int(entry.get("consecutive_failures") or 0) + 1
+            sources[name] = entry
+        result = {"schema_version": 1, "updated_at": now, "sources": sources}
+        write_json(self.sources_health_path, result)
+        return result
