@@ -211,6 +211,40 @@ def test_all_filtered_run_fails_without_overwriting_last_good_data(config: Confi
     assert read(config.data_dir / "jobs.json") == sentinel
 
 
+def test_required_source_failure_preserves_data_and_success_timestamp(config: Config):
+    config.sources[0].required = True
+    config.sources[0].path = "missing.json"
+    config.data_dir.mkdir(parents=True)
+    sentinel = [{"title": "上一版有效岗位"}]
+    (config.data_dir / "jobs.json").write_text(json.dumps(sentinel), encoding="utf-8")
+
+    report = Pipeline(config).run()
+    state = Pipeline(config).store.load_state()
+    health = Pipeline(config).store.load_sources_health()
+
+    assert report.status == "failed"
+    assert report.published is False
+    assert "必需数据源" in report.errors[-1]
+    assert read(config.data_dir / "jobs.json") == sentinel
+    assert "last_run_at" not in state
+    assert state["last_published"] is False
+    assert health["sources"]["seed"]["consecutive_failures"] == 1
+
+
+def test_quality_gate_preserves_last_good_data(config: Config):
+    config.output.min_quality_score = 100
+    config.data_dir.mkdir(parents=True)
+    sentinel = [{"title": "上一版有效岗位"}]
+    (config.data_dir / "jobs.json").write_text(json.dumps(sentinel), encoding="utf-8")
+
+    report = Pipeline(config).run()
+
+    assert report.status == "failed"
+    assert report.quality["score"] < 100  # Fixture intentionally has no URLs.
+    assert "数据质量分" in report.errors[-1]
+    assert read(config.data_dir / "jobs.json") == sentinel
+
+
 def test_fixture_collector_filters_by_city_and_keyword(config: Config, seed_file: Path):
     context = CollectorContext(project_root=config.project_root)
 

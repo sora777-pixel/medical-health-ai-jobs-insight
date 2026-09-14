@@ -11,8 +11,15 @@ import {
   Search, X, AlertCircle, ExternalLink
 } from 'lucide-react'
 import { AutomationPanel } from '@/components/AutomationPanel'
+import { DataStatusBar } from '@/components/DataStatusBar'
 import { useAutomation } from '@/hooks/useAutomation'
-import { fetchDataFile } from '@/lib/automation'
+import {
+  fetchDataFile,
+  fetchDataFileWithMeta,
+  fetchManifest,
+  type DataManifest,
+  type DataOrigin,
+} from '@/lib/automation'
 import './App.css'
 
 // 类型定义
@@ -158,6 +165,8 @@ function App() {
   const [agencies, setAgencies] = useState<Agency[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [manifest, setManifest] = useState<DataManifest | null>(null)
+  const [dataOrigin, setDataOrigin] = useState<DataOrigin | null>(null)
   const [isUpdating, setIsUpdating] = useState(false)
   
   // 筛选状态
@@ -180,13 +189,16 @@ function App() {
   const automation = useAutomation()
 
   const loadData = useCallback(async () => {
-    const [jobsData, statsData] = await Promise.all([
-      fetchDataFile<Job[]>('jobs'),
-      fetchDataFile<Stats>('stats')
+    const [jobsResult, statsResult, manifestResult] = await Promise.all([
+      fetchDataFileWithMeta<Job[]>('jobs'),
+      fetchDataFileWithMeta<Stats>('stats'),
+      fetchManifest(),
     ])
-    setJobs(jobsData)
-    setStats(statsData)
-    return { jobs: jobsData, stats: statsData }
+    setJobs(jobsResult.data)
+    setStats(statsResult.data)
+    setManifest(manifestResult?.data ?? null)
+    setDataOrigin(jobsResult.origin)
+    return { jobs: jobsResult.data, stats: statsResult.data }
   }, [])
 
   // 更新按钮：接口在线时触发后台流水线跑一次，否则只重新拉取已产出的数据
@@ -198,9 +210,12 @@ function App() {
       if (automation.online) {
         const report = await automation.runNow()
         if (!report) throw new Error(automation.error ?? '运行失败')
+        if (report.published === false || report.status === 'failed') {
+          throw new Error(report.errors?.[0] ?? '数据未通过发布门禁，已保留上一版数据')
+        }
         await loadData()
         setUpdateResult(
-          `更新完成！新增 ${report.diff?.new_jobs ?? 0} 个岗位，更新 ${report.diff?.updated_jobs ?? 0} 个，下架 ${report.diff?.deleted_jobs ?? 0} 个`
+          `${report.status === 'partial' ? '部分来源失败，已发布可用数据。' : '更新完成！'}新增 ${report.diff?.new_jobs ?? 0} 个岗位，更新 ${report.diff?.updated_jobs ?? 0} 个，下架 ${report.diff?.deleted_jobs ?? 0} 个`
         )
       } else {
         const { stats: latest } = await loadData()
@@ -475,7 +490,7 @@ function App() {
             className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 mb-6"
           >
             <Activity className="w-4 h-4 text-[#F5B935]" />
-            <span className="text-sm">实时数据更新</span>
+            <span className="text-sm">{dataOrigin === 'api' ? '实时 API 数据' : '定时更新数据快照'}</span>
           </motion.div>
 
           <motion.h1
@@ -582,8 +597,10 @@ function App() {
         </motion.div>
       </section>
 
+      <DataStatusBar manifest={manifest} origin={dataOrigin} />
+
       {/* 自动化运行状态与 LLM 洞察 */}
-      <AutomationPanel automation={automation} />
+      <AutomationPanel automation={automation} manifest={manifest} />
 
       {/* 平台生态概览 */}
       <section className="py-20 px-4">
