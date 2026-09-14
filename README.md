@@ -3,6 +3,20 @@
 医药健康 + AI 岗位洞察：一个**会自己跑**的数据项目。后台流水线按你设定的时间采集岗位、
 调用 LLM 规范化与分析，产出 JSON，前端可视化看板直接读这些 JSON。
 
+## 当前版本
+
+| 能力 | 状态 |
+| --- | --- |
+| 自定义调度 | 支持每天定点、cron、固定间隔、手动运行及 GitHub Actions |
+| LLM | 支持 OpenAI 兼容接口、Anthropic、Ollama 和离线 mock，失败自动回退规则解析 |
+| 数据采集 | 支持本地 JSON、JSON API、网页 + LLM，以及需要授权会话的 Playwright 浏览器 |
+| 发布安全 | 必需来源、最低采集量、相关度过滤和质量分均可作为发布门禁 |
+| 可观测性 | 提供数据版本、来源健康、质量、新鲜度、运行历史和 `doctor` 诊断 |
+| 前端降级 | 实时 API 优先，后端不可用时自动读取静态数据快照 |
+
+> 仓库默认启用的是 fixture 示例数据和 mock LLM，目的是无需账号即可验证完整流程。
+> 若要持续获取真实招聘数据，请按“数据源”章节配置有权访问的接口或浏览器账号，并遵守平台条款。
+
 ```
                  ┌──────────── 你设定的运行时间 ────────────┐
                  │  每天定点 / cron / 固定间隔 / 仅手动      │
@@ -21,7 +35,7 @@
 
 ## 快速开始
 
-后端零依赖，只需要 Python 3.11+（用到 `tomllib`、`zoneinfo`、`urllib`、`http.server`）。
+后端核心零依赖，只需要 Python 3.11+（浏览器采集才需要可选 Playwright）。
 
 ```bash
 # 1. 跑一次流水线（默认离线 mock provider，不需要 API Key）
@@ -156,6 +170,7 @@ Cookie 均被 Git 忽略。该采集器不会规避验证码、风控或平台�
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/health` | 健康检查 |
+| GET | `/api/doctor` | 配置、来源、数据质量与新鲜度诊断 |
 | GET | `/api/status` | 调度状态、LLM 配置、数据源、最近一次运行 |
 | GET | `/api/config` | 脱敏后的完整配置 |
 | GET | `/api/schedule` | 当前运行时间与未来 5 次触发时刻 |
@@ -183,7 +198,8 @@ Cookie 均被 Git 忽略。该采集器不会规避验证码、风控或平台�
 `/api/health`、`/api/status` 和 `/api/doctor` 可供监控系统读取。
 
 运行状态在 `automation/state/`（不入库）：`state.json`（上次运行时间）、`runs.json`（运行历史）、
-`jobs_snapshot.json`（用于算增量）、`overrides.json`（运行时改过的配置）。
+`jobs_snapshot.json`（用于算增量）、`sources_health.json`（来源健康历史）和
+`overrides.json`（运行时改过的配置）。
 
 ## 配置的优先级
 
@@ -194,6 +210,15 @@ Cookie 均被 Git 忽略。该采集器不会规避验证码、风控或平台�
 常用环境变量：`JOBSINSIGHT_LLM_API_KEY`、`JOBSINSIGHT_LLM_PROVIDER`、`JOBSINSIGHT_LLM_MODEL`、
 `JOBSINSIGHT_SCHEDULE_MODE`、`JOBSINSIGHT_SCHEDULE_DAILY_TIMES`、`JOBSINSIGHT_SCHEDULE_CRON`、
 `JOBSINSIGHT_SERVER_PORT`、`JOBSINSIGHT_SERVER_AUTH_TOKEN`。API Key 不要写进仓库。
+
+## 生产部署检查
+
+1. 对真实来源设置 `required = true` 和合理的 `min_collected`，避免登录过期时发布空数据。
+2. 设置 `output.min_quality_score`（建议先观察实际质量分，再逐步提高门槛）。
+3. 把 API Key、账号密码和 `server.auth_token` 放入 Secret 或环境变量，不提交到 Git。
+4. 首次部署运行 `python -m jobsinsight run`，确认 `manifest.json` 和来源健康记录已生成。
+5. 执行 `python -m jobsinsight doctor --strict`；生产环境应处理完全部警告。
+6. 通过 `/api/health` 监控数据年龄和最近运行状态，通过 `/api/doctor` 查看具体故障。
 
 ## 开发
 
@@ -215,14 +240,17 @@ npm run lint && npm run build
 ```
 automation/                 自动化后端（Python，零依赖）
 ├── config.toml             运行时间、LLM、数据源、产出、接口配置
+├── config/                 私密账号配置示例（真实 accounts.toml 不入库）
 ├── data/                   示例数据源
 ├── jobsinsight/
 │   ├── cli.py              命令行入口
 │   ├── config.py           配置加载与校验
 │   ├── cron.py             5 字段 cron 解析
 │   ├── scheduler.py        运行时间计算与调度守护
-│   ├── collectors/         数据源（fixture / json_api / html_llm）
+│   ├── collectors/         数据源（fixture / json_api / html_llm / browser）
 │   ├── llm/                统一 LLM 调用接口
+│   ├── diagnostics.py      doctor 预检与故障定位
+│   ├── quality.py          数据质量和岗位新鲜度
 │   ├── enrich.py           LLM 富化 + 洞察
 │   ├── heuristics.py       规则兜底
 │   ├── analysis.py         统计聚合
@@ -236,6 +264,7 @@ web/                        前端看板（React + TypeScript + Vite）
 └── src/
     ├── App.tsx             看板主体
     ├── components/AutomationPanel.tsx   自动化状态与洞察面板
+    ├── components/DataStatusBar.tsx     数据版本、质量与来源状态
     ├── hooks/useAutomation.ts
     └── lib/automation.ts   自动化接口客户端
 ```
