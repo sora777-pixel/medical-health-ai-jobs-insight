@@ -1,19 +1,19 @@
 {
-  "generated_at": "2026-09-14T20:14:41+00:00",
+  "generated_at": "2026-09-15T19:37:43+00:00",
   "provider": "mock",
   "model": "mock-1",
   "schedule": {
     "mode": "daily",
     "description": "每天 00:00 (Asia/Shanghai)",
     "timezone": "Asia/Shanghai",
-    "next_run": "2026-09-16T00:00+08:00"
+    "next_run": "2026-09-17T00:00+08:00"
   },
   "run": {
     "total_jobs": 398,
-    "new_jobs": 398,
+    "new_jobs": 0,
     "updated_jobs": 0,
     "deleted_jobs": 0,
-    "unchanged_jobs": 0
+    "unchanged_jobs": 398
   },
   "source": "llm",
   "headline": "共 398 个医药健康+AI 岗位，南京需求最集中",
@@ -34,6 +34,6 @@
     "优先补齐排名前三的技能",
     "关注需求最集中的城市"
   ],
-  "run_id": "20260914T201441Z",
+  "run_id": "20260915T193743Z",
   "data_version": "b31552a175adfe6e"
 }
