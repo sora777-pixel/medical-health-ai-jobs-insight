@@ -1,6 +1,6 @@
 {
   "total_jobs": 398,
-  "last_update": "2026-09-20",
+  "last_update": "2026-09-21",
   "new_jobs_today": 0,
   "updated_jobs_today": 0,
   "deleted_jobs_today": 0,
@@ -200,8 +200,8 @@
       "top_title_count": 8
     }
   },
-  "run_id": "20260920T183759Z",
-  "generated_at": "2026-09-20T18:37:59+00:00",
+  "run_id": "20260921T202125Z",
+  "generated_at": "2026-09-21T20:21:25+00:00",
   "data_version": "b31552a175adfe6e",
   "quality": {
     "score": 75,
@@ -219,7 +219,7 @@
   "freshness": {
     "newest_publish_date": "2026-02-19",
     "oldest_publish_date": "2026-01-20",
-    "median_age_days": 228,
+    "median_age_days": 229,
     "stale_over_30d": 398,
     "future_dated": 0,
     "missing_publish_date": 0
