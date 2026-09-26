@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-09-25T19:56:33+00:00",
+  "generated_at": "2026-09-26T19:08:56+00:00",
   "provider": "mock",
   "model": "mock-1",
   "schedule": {
     "mode": "daily",
     "description": "每天 00:00 (Asia/Shanghai)",
     "timezone": "Asia/Shanghai",
-    "next_run": "2026-09-27T00:00+08:00"
+    "next_run": "2026-09-28T00:00+08:00"
   },
   "run": {
     "total_jobs": 398,
@@ -34,6 +34,6 @@
     "优先补齐排名前三的技能",
     "关注需求最集中的城市"
   ],
-  "run_id": "20260925T195633Z",
+  "run_id": "20260926T190856Z",
   "data_version": "b31552a175adfe6e"
 }
