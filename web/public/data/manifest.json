@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
-  "run_id": "20260929T203749Z",
+  "run_id": "20260930T204139Z",
   "data_version": "b31552a175adfe6e",
-  "generated_at": "2026-09-29T20:37:49+00:00",
+  "generated_at": "2026-09-30T20:41:40+00:00",
   "status": "success",
   "counts": {
     "raw": 398,
@@ -37,7 +37,7 @@
   "freshness": {
     "newest_publish_date": "2026-02-19",
     "oldest_publish_date": "2026-01-20",
-    "median_age_days": 237,
+    "median_age_days": 238,
     "stale_over_30d": 398,
     "future_dated": 0,
     "missing_publish_date": 0
