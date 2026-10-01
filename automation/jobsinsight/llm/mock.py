@@ -58,11 +58,43 @@ def _daily_insight(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _parse_candidate_profile(payload: dict[str, Any]) -> dict[str, Any]:
+    from ..career.profile import parse_profile_heuristic
+
+    return parse_profile_heuristic(str(payload.get("text") or "")).as_dict()
+
+
+def _normalize_skill_name(payload: dict[str, Any]) -> dict[str, Any]:
+    # Ambiguous names stay unresolved in offline mode. Alias hits never get here.
+    return {"canonical_name": str(payload.get("name") or ""), "confident": False}
+
+
+def _explain_match(payload: dict[str, Any]) -> dict[str, Any]:
+    matched = [str(item) for item in payload.get("matched_skills") or []]
+    missing = [str(item) for item in payload.get("missing_skills") or []]
+    reasons = []
+    if matched:
+        reasons.append(f"已匹配技能：{'、'.join(matched[:6])}")
+    if missing:
+        reasons.append(f"岗位要求中尚未覆盖：{'、'.join(missing[:6])}")
+    if not reasons:
+        reasons.append("输入中没有足够的技能重合信息。")
+    return {
+        "reasons": reasons,
+        "strengths": matched[:6],
+        "gaps": missing[:6],
+        "summary": "根据已计算的匹配明细生成说明，不改变分数。",
+    }
+
+
 DEFAULT_HANDLERS: dict[str, TaskHandler] = {
     "enrich_job": _enrich_job,
     "enrich_jobs": _enrich_jobs,
     "extract_postings": _extract_postings,
     "daily_insight": _daily_insight,
+    "parse_candidate_profile": _parse_candidate_profile,
+    "normalize_skill": _normalize_skill_name,
+    "explain_match": _explain_match,
 }
 
 

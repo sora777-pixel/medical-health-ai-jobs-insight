@@ -8,9 +8,10 @@ import {
   Briefcase, MapPin, DollarSign, Building2, 
   GraduationCap, Code, Activity, ChevronDown, ChevronUp,
   Filter, Clock, TrendingUp, Award, RefreshCw, Calendar,
-  Search, X, AlertCircle, ExternalLink
+  Search, X, AlertCircle, ExternalLink, User
 } from 'lucide-react'
 import { AutomationPanel } from '@/components/AutomationPanel'
+import { CareerPanel } from '@/components/CareerPanel'
 import { DataStatusBar } from '@/components/DataStatusBar'
 import { useAutomation } from '@/hooks/useAutomation'
 import {
@@ -184,6 +185,7 @@ function App() {
   const [showAllJobs, setShowAllJobs] = useState(false)
   const [showFilters, setShowFilters] = useState(false)
   const [updateResult, setUpdateResult] = useState<string>('')
+  const [view, setView] = useState<'market' | 'career'>('market')
 
   // 自动化后端状态（运行时间、上次运行、LLM 洞察）
   const automation = useAutomation()
@@ -439,6 +441,38 @@ function App() {
 
   return (
     <div className="min-h-screen bg-[#0A1628] text-white overflow-x-hidden">
+      <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0A1628]/90 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+          <div className="font-semibold">Healthcare AI Career Copilot</div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setView('market')}
+              className={`px-3 py-1.5 rounded-lg text-sm ${view === 'market' ? 'bg-[#1B45F4]' : 'bg-white/10 text-white/70'}`}
+            >
+              岗位洞察
+            </button>
+            <button
+              type="button"
+              onClick={() => setView('career')}
+              className={`px-3 py-1.5 rounded-lg text-sm inline-flex items-center gap-1 ${view === 'career' ? 'bg-[#1B45F4]' : 'bg-white/10 text-white/70'}`}
+            >
+              <User className="w-3.5 h-3.5" />
+              My Career
+            </button>
+          </div>
+        </div>
+      </header>
+      {view === 'career' ? (
+        <CareerPanel
+          onViewJob={(title) => {
+            setSearchSummary(title)
+            setShowFilters(true)
+            setView('market')
+          }}
+        />
+      ) : (
+        <>
       {/* Hero Section */}
       <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
         {/* 动态背景 */}
@@ -1413,6 +1447,9 @@ function App() {
           </motion.div>
         </div>
       </section>
+
+        </>
+      )}
 
       {/* Footer */}
       <footer className="py-12 px-4 border-t border-white/10">

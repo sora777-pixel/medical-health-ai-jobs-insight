@@ -15,6 +15,12 @@
     POST   /api/llm/chat            透传调用 LLM
     POST   /api/llm/ask             基于当前数据问答
     GET    /api/data/<name>.json    读取产出的数据文件
+    POST   /api/candidates/profile 保存候选人画像
+    POST   /api/candidates/parse   从自然语言提取画像
+    GET    /api/candidates/<id>    读取画像
+    POST   /api/matches            对已保存画像做岗位匹配
+    GET    /api/matches/<id>       读取最近一次匹配
+    GET    /api/skills/gaps        聚合技能差距（?candidate_id=）
 """
 
 from __future__ import annotations
@@ -22,6 +28,7 @@ from __future__ import annotations
 import json
 import logging
 import mimetypes
+import re
 import threading
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
@@ -29,7 +36,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .config import Config, ConfigError, ScheduleSettings, save_overrides
 from .llm import ChatMessage, LLMError, build_client
@@ -38,6 +45,9 @@ from .scheduler import Scheduler, next_run_after, upcoming_runs
 from .store import read_json
 
 LOGGER = logging.getLogger(__name__)
+
+_CANDIDATE_PATH = re.compile(r"^/api/candidates/([^/]+)$")
+_MATCH_PATH = re.compile(r"^/api/matches/([^/]+)$")
 
 SCHEDULE_FIELDS = (
     "enabled",
@@ -269,6 +279,78 @@ class AutomationService:
 
     # ------------------------------------------------------------------ data
 
+    # --------------------------------------------------------------- career
+
+    def career_service(self):
+        service = getattr(self, "_career_service", None)
+        if service is None:
+            from .career.service import CareerService
+
+            service = CareerService(self.config, llm_client=lambda: self.pipeline.llm)
+            self._career_service = service
+        return service
+
+    def career_parse(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "缺少 text 字段")
+        profile = self.career_service().parse_candidate_profile(text)
+        return {"profile": profile.as_dict()}
+
+    def career_save_profile(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        if not payload:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "缺少候选人画像")
+        try:
+            profile = self.career_service().save_profile(payload)
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+        return {"profile": profile.as_dict()}
+
+    def career_get_profile(self, candidate_id: str) -> dict[str, Any]:
+        try:
+            profile = self.career_service().get_profile(candidate_id)
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+        if profile is None:
+            raise ApiError(HTTPStatus.NOT_FOUND, "候选人不存在")
+        return {"profile": profile.as_dict()}
+
+    def career_match(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        candidate_id = str(payload.get("candidate_id") or "").strip()
+        if not candidate_id:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "缺少 candidate_id")
+        top_k = payload.get("top_k", 20)
+        try:
+            top_k_value = int(top_k)
+        except (TypeError, ValueError) as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "top_k 必须是整数") from exc
+        try:
+            return self.career_service().match_candidate(candidate_id, top_k=top_k_value)
+        except KeyError as exc:
+            raise ApiError(HTTPStatus.NOT_FOUND, "候选人不存在") from exc
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+
+    def career_get_matches(self, candidate_id: str) -> dict[str, Any]:
+        try:
+            payload = self.career_service().get_matches(candidate_id)
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+        if payload is None:
+            raise ApiError(HTTPStatus.NOT_FOUND, "还没有匹配结果")
+        return payload
+
+    def career_skill_gaps(self, candidate_id: str) -> dict[str, Any]:
+        if not candidate_id:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "缺少 candidate_id")
+        try:
+            gaps = self.career_service().analyze_skill_gap(candidate_id)
+        except KeyError as exc:
+            raise ApiError(HTTPStatus.NOT_FOUND, "候选人不存在") from exc
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+        return {"candidate_id": candidate_id, "skill_gaps": gaps}
+
     def data_file(self, name: str) -> Any:
         if name not in DATA_FILES:
             raise ApiError(HTTPStatus.NOT_FOUND, f"未知数据文件 {name}")
@@ -333,7 +415,9 @@ def make_handler(service: AutomationService) -> type[BaseHTTPRequestHandler]:
         # ------------------------------------------------------------ routing
 
         def do_GET(self) -> None:  # noqa: N802 - http.server API
-            path = urlparse(self.path).path.rstrip("/") or "/"
+            parsed = urlparse(self.path)
+            path = parsed.path.rstrip("/") or "/"
+            query = parse_qs(parsed.query)
             routes: dict[str, Callable[[], Any]] = {
                 "/api/health": service.health_payload,
                 "/api/doctor": service.doctor_payload,
@@ -356,6 +440,18 @@ def make_handler(service: AutomationService) -> type[BaseHTTPRequestHandler]:
             if path.startswith("/data/"):
                 name = path.rsplit("/", 1)[-1].removesuffix(".json")
                 self._guard(lambda: service.data_file(name))
+                return
+            if path == "/api/skills/gaps":
+                candidate_id = (query.get("candidate_id") or [""])[0]
+                self._guard(lambda: service.career_skill_gaps(candidate_id))
+                return
+            candidate_match = _CANDIDATE_PATH.fullmatch(path)
+            if candidate_match:
+                self._guard(lambda: service.career_get_profile(candidate_match.group(1)))
+                return
+            match_path = _MATCH_PATH.fullmatch(path)
+            if match_path:
+                self._guard(lambda: service.career_get_matches(match_path.group(1)))
                 return
             if path.startswith("/api/"):
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"未知接口 {path}"})
@@ -401,6 +497,12 @@ def make_handler(service: AutomationService) -> type[BaseHTTPRequestHandler]:
                 self._guard(lambda: service.llm_chat(payload))
             elif path == "/api/llm/ask":
                 self._guard(lambda: service.llm_ask(payload))
+            elif path == "/api/candidates/parse":
+                self._guard(lambda: service.career_parse(payload))
+            elif path == "/api/candidates/profile":
+                self._guard(lambda: service.career_save_profile(payload))
+            elif path == "/api/matches":
+                self._guard(lambda: service.career_match(payload))
             else:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"未知接口 {path}"})
 

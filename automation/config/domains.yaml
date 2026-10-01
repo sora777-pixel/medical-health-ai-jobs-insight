@@ -1,0 +1,92 @@
+# Rule map from candidate wording to dashboard job categories.
+# No embeddings: alias containment only.
+domains:
+  bioinformatics:
+    canonical: Bioinformatics
+    categories:
+      - 生物信息
+    aliases:
+      - bioinformatics
+      - Bioinformatics
+      - 生物信息
+      - 生物信息学
+  ai_drug_discovery:
+    canonical: AI Drug Discovery
+    categories:
+      - AI药物研发
+    aliases:
+      - ai drug discovery
+      - AI Drug Discovery
+      - drug discovery
+      - ai药物研发
+      - AI药物研发
+      - 药物研发
+      - 药物发现
+  medical_ai:
+    canonical: Medical AI
+    categories:
+      - 医疗大模型
+    aliases:
+      - medical ai
+      - healthcare ai
+      - Medical AI
+      - 医疗ai
+      - 医疗AI
+      - 医疗人工智能
+  medical_nlp:
+    canonical: Medical NLP
+    categories:
+      - 医疗大模型
+      - 临床NLP
+      - 医学NLP
+    aliases:
+      - medical nlp
+      - clinical nlp
+      - healthcare nlp
+      - Medical NLP
+      - 医学自然语言处理
+      - 医疗nlp
+      - 医学nlp
+      - 临床nlp
+  medical_imaging:
+    canonical: Medical Imaging
+    categories:
+      - 医学影像AI
+    aliases:
+      - medical imaging
+      - Medical Imaging
+      - 医学影像
+      - 医学影像ai
+  clinical_data:
+    canonical: Clinical Data Science
+    categories:
+      - 临床数据科学
+    aliases:
+      - clinical data
+      - 临床数据
+      - 临床数据科学
+
+roles:
+  medical_ai_engineer:
+    canonical: Medical AI Engineer
+    aliases:
+      - medical ai engineer
+      - healthcare ai engineer
+      - 医疗ai工程师
+      - 医疗人工智能工程师
+  bioinformatics_scientist:
+    canonical: Bioinformatics Scientist
+    aliases:
+      - bioinformatics scientist
+      - 生物信息科学家
+      - 生物信息学科学家
+  ai_drug_discovery_scientist:
+    canonical: AI Drug Discovery Scientist
+    aliases:
+      - ai drug discovery scientist
+      - drug discovery scientist
+      - ai药物研发
+      - AI药物研发
+      - ai药物研发科学家
+      - ai药物研发工程师
+      - 药物发现科学家

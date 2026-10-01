@@ -1,0 +1,165 @@
+# Canonical skills for Healthcare AI matching.
+# Lookup is deterministic: aliases are matched before any LLM call.
+skills:
+  python:
+    canonical: Python
+    aliases:
+      - python
+      - Python
+  pytorch:
+    canonical: PyTorch
+    aliases:
+      - pytorch
+      - torch
+      - PyTorch
+      - PyTorch framework
+  tensorflow:
+    canonical: TensorFlow
+    aliases:
+      - tensorflow
+      - TensorFlow
+      - keras
+  docker:
+    canonical: Docker
+    aliases:
+      - docker
+      - Docker
+      - 容器
+  linux:
+    canonical: Linux
+    aliases:
+      - linux
+      - Linux
+      - ubuntu
+  sql:
+    canonical: SQL
+    aliases:
+      - sql
+      - SQL
+      - mysql
+      - postgres
+      - postgresql
+  r:
+    canonical: R
+    aliases:
+      - r
+      - R
+      - r语言
+      - R语言
+      - rstudio
+  pandas:
+    canonical: Pandas
+    aliases:
+      - pandas
+      - Pandas
+  numpy:
+    canonical: NumPy
+    aliases:
+      - numpy
+      - NumPy
+  scrna_seq:
+    canonical: scRNA-seq
+    aliases:
+      - scRNA-seq
+      - scrna-seq
+      - scrna seq
+      - single-cell rna-seq
+      - single cell rna-seq
+      - 单细胞
+      - 单细胞转录组
+      - 单细胞测序
+  bioinformatics:
+    canonical: Bioinformatics
+    aliases:
+      - bioinformatics
+      - Bioinformatics
+      - 生物信息
+      - 生物信息学
+  machine_learning:
+    canonical: Machine Learning
+    aliases:
+      - machine learning
+      - Machine Learning
+      - 机器学习
+  deep_learning:
+    canonical: Deep Learning
+    aliases:
+      - deep learning
+      - Deep Learning
+      - 深度学习
+  llm:
+    canonical: LLM
+    aliases:
+      - llm
+      - LLM
+      - large language model
+      - 大模型
+      - 大语言模型
+  rag:
+    canonical: RAG
+    aliases:
+      - rag
+      - RAG
+      - retrieval augmented generation
+      - 检索增强
+  medical_nlp:
+    canonical: Medical NLP
+    aliases:
+      - medical nlp
+      - clinical nlp
+      - healthcare nlp
+      - Medical NLP
+      - 医学自然语言处理
+      - 医疗nlp
+      - 医学nlp
+      - 临床nlp
+  medical_imaging:
+    canonical: Medical Imaging
+    aliases:
+      - medical imaging
+      - Medical Imaging
+      - 医学影像
+      - 影像ai
+  fhir:
+    canonical: FHIR
+    aliases:
+      - fhir
+      - FHIR
+  hl7:
+    canonical: HL7
+    aliases:
+      - hl7
+      - HL7
+  mlops:
+    canonical: MLOps
+    aliases:
+      - mlops
+      - MLOps
+      - ml ops
+  gnn:
+    canonical: GNN
+    aliases:
+      - gnn
+      - GNN
+      - graph neural network
+      - 图神经网络
+  rdkit:
+    canonical: RDKit
+    aliases:
+      - rdkit
+      - RDKit
+  molecular_modeling:
+    canonical: Molecular Modeling
+    aliases:
+      - molecular modeling
+      - Molecular Modeling
+      - 分子模拟
+      - 分子建模
+  drug_discovery:
+    canonical: Drug Discovery
+    aliases:
+      - drug discovery
+      - Drug Discovery
+      - 药物研发
+      - 药物发现
+      - aidd
