@@ -13,6 +13,7 @@ import {
 import { AutomationPanel } from '@/components/AutomationPanel'
 import { CareerPanel } from '@/components/CareerPanel'
 import { DataStatusBar } from '@/components/DataStatusBar'
+import { SourceHealthPanel } from '@/components/SourceHealthPanel'
 import { useAutomation } from '@/hooks/useAutomation'
 import {
   fetchDataFile,
@@ -42,7 +43,12 @@ interface Job {
   skills: string[]
   publish_date: string
   update_date: string
-  status: 'active' | 'deleted' | 'updated'
+  status: 'active' | 'deleted' | 'updated' | 'stale'
+  url?: string
+  source_url?: string
+  partial?: boolean
+  last_seen_at?: string
+  discovery_method?: string
 }
 
 interface Headhunter {
@@ -463,6 +469,7 @@ function App() {
           </div>
         </div>
       </header>
+      <SourceHealthPanel />
       {view === 'career' ? (
         <CareerPanel
           onViewJob={(title) => {
@@ -1203,6 +1210,16 @@ function App() {
                         <span className="px-2 py-1 text-xs rounded-full bg-[#F5B935]/20 text-[#F5B935]">
                           {job.job_level}
                         </span>
+                        {job.partial && (
+                          <span className="px-2 py-1 text-xs rounded-full bg-[#F5B935]/20 text-[#F5B935]">
+                            部分数据
+                          </span>
+                        )}
+                        {job.status === 'stale' && (
+                          <span className="px-2 py-1 text-xs rounded-full bg-white/10 text-white/60">
+                            待确认
+                          </span>
+                        )}
                         {/* 今日新发布标签 */}
                         {job.publish_date === new Date().toISOString().split('T')[0] && (
                           <span className="px-2 py-1 text-xs rounded-full bg-[#00B578]/20 text-[#00B578] flex items-center gap-1">
@@ -1235,6 +1252,11 @@ function App() {
                           <MapPin className="w-4 h-4" />
                           {job.city}
                         </span>
+                        {(job.source_url || job.url) && (
+                          <a className="text-[#4D6CFA] hover:underline" href={job.source_url || job.url} target="_blank" rel="noreferrer">
+                            查看原职位
+                          </a>
+                        )}
                         <span className="flex items-center gap-1">
                           <GraduationCap className="w-4 h-4" />
                           {job.education}

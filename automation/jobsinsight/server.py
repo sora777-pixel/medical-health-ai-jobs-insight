@@ -340,6 +340,47 @@ class AutomationService:
             raise ApiError(HTTPStatus.NOT_FOUND, "还没有匹配结果")
         return payload
 
+    def sources_overview(self) -> dict[str, Any]:
+        from .sources.runner import sources_overview
+
+        return sources_overview(self.config)
+
+    def sources_health(self) -> dict[str, Any]:
+        from .sources.health import load_health
+
+        return load_health(self.config.state_dir)
+
+    def search_providers(self) -> dict[str, Any]:
+        from .sources.search_provider import provider_catalog
+
+        return {"providers": provider_catalog()}
+
+    def search_test(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        from .sources.http_client import HttpClient
+        from .sources.search_provider import choose_provider
+
+        provider = choose_provider(HttpClient())
+        query = str(payload.get("query") or "site:zhipin.com 上海 医疗AI")
+        if provider is None:
+            return {"provider": "unavailable", "hits": []}
+        outcome = provider.search(query, limit=int(payload.get("limit") or 5))
+        return {
+            "provider": outcome.provider,
+            "status": outcome.status,
+            "error": outcome.error,
+            "query": query,
+            "count": len(outcome.hits),
+        }
+
+    def sources_test(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        from .sources.runner import test_sources
+
+        source = str(payload.get("source") or "")
+        test_all = bool(payload.get("all") or not source)
+        return test_sources(
+            self.config, source=source, test_all=test_all, max_queries=int(payload.get("max_queries") or 2)
+        )
+
     def career_skill_gaps(self, candidate_id: str) -> dict[str, Any]:
         if not candidate_id:
             raise ApiError(HTTPStatus.BAD_REQUEST, "缺少 candidate_id")
@@ -426,6 +467,9 @@ def make_handler(service: AutomationService) -> type[BaseHTTPRequestHandler]:
                 "/api/schedule": service.schedule_payload,
                 "/api/runs": lambda: {"runs": service.pipeline.store.load_history()},
                 "/api/runs/latest": lambda: _latest_run(service),
+                "/api/sources": service.sources_overview,
+                "/api/sources/health": service.sources_health,
+                "/api/search/providers": service.search_providers,
             }
             if path in routes:
                 self._guard(routes[path])
@@ -503,6 +547,10 @@ def make_handler(service: AutomationService) -> type[BaseHTTPRequestHandler]:
                 self._guard(lambda: service.career_save_profile(payload))
             elif path == "/api/matches":
                 self._guard(lambda: service.career_match(payload))
+            elif path == "/api/sources/test":
+                self._guard(lambda: service.sources_test(payload))
+            elif path == "/api/search/test":
+                self._guard(lambda: service.search_test(payload))
             else:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"未知接口 {path}"})
 

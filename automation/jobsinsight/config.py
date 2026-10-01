@@ -200,6 +200,9 @@ class OutputSettings:
     write_insights: bool = True
     #: 低于此质量分时拒绝覆盖上一版数据；0 表示只记录、不拦截。
     min_quality_score: int = 0
+    #: 来源健康且连续缺席这么多次后标记 stale，再多一次才允许 deleted。
+    stale_after_misses: int = 3
+    delete_after_misses: int = 4
 
     def validate(self) -> None:
         if not 0 <= self.min_relevance <= 100:
@@ -208,6 +211,10 @@ class OutputSettings:
             raise ConfigError("output.keep_runs must be >= 1")
         if not 0 <= self.min_quality_score <= 100:
             raise ConfigError("output.min_quality_score must be between 0 and 100")
+        if self.stale_after_misses < 1:
+            raise ConfigError("output.stale_after_misses must be >= 1")
+        if self.delete_after_misses <= self.stale_after_misses:
+            raise ConfigError("output.delete_after_misses must be greater than stale_after_misses")
 
 
 @dataclass
@@ -338,6 +345,9 @@ def load_config(
     root = project_root or _infer_project_root(config_path)
 
     if apply_env:
+        from .env import load_environment
+
+        load_environment(root)
         raw = _expand_env(raw)
         _merge(raw, _env_overrides())
 

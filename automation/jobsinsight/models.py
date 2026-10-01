@@ -31,11 +31,21 @@ class RawPosting:
     company_level: str = ""
     description: str = ""
     publish_date: str = ""
+    source_type: str = ""
+    discovery_method: str = ""
+    source_url: str = ""
+    retrieved_at: str = ""
+    partial: bool = False
+    discovery_query: str = ""
+    detail_fetch_status: str = ""
 
     @property
     def fingerprint(self) -> str:
         """Identity used for dedupe across runs and platforms."""
-        return f"{self.platform}|{self.company}|{self.title}|{self.city}".lower()
+        base = f"{self.platform}|{self.company}|{self.title}|{self.city}".lower()
+        if not self.company and (self.url or self.source_url):
+            return f"{base}|{(self.url or self.source_url).lower()}"
+        return base
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -74,6 +84,18 @@ class Job:
     relevance: int = 0
     enriched_by: str = "heuristic"
     fingerprint: str = ""
+    source_type: str = ""
+    discovery_method: str = ""
+    retrieved_at: str = ""
+    partial: bool = False
+    source_url: str = ""
+    first_seen_at: str = ""
+    last_seen_at: str = ""
+    last_verified_at: str = ""
+    consecutive_misses: int = 0
+    source_status: str = "active"
+    discovery_query: str = ""
+    detail_fetch_status: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)

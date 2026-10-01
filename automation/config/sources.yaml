@@ -1,0 +1,29 @@
+# Public discovery only. Direct site APIs that demand a challenge stay blocked.
+sources:
+  zhipin:
+    enabled: true
+    mode:
+      - search_discovery
+      - public_detail
+    domains:
+      - zhipin.com
+    rate_limit_per_minute: 10
+  51job:
+    enabled: true
+    mode:
+      - search_discovery
+      - public_detail
+    domains:
+      - 51job.com
+    rate_limit_per_minute: 10
+  liepin:
+    enabled: true
+    mode:
+      - search_discovery
+      - public_detail
+    domains:
+      - liepin.com
+    rate_limit_per_minute: 10
+  search:
+    enabled: true
+    provider: auto

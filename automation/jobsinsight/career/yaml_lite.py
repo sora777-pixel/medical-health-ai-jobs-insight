@@ -99,10 +99,20 @@ def _parse_list(lines: list[tuple[int, str]], index: int, indent: int) -> tuple[
             else:
                 items.append(None)
             continue
-        if item.endswith(":") and index < len(lines) and lines[index][0] > indent:
-            key = str(_scalar(item[:-1]))
-            child, index = _parse_node(lines, index)
-            items.append({key: child})
+        if ":" in item:
+            key, _, rest = item.partition(":")
+            key_text = str(_scalar(key))
+            if rest.strip():
+                mapping: dict[str, Any] = {key_text: _scalar(rest)}
+            elif index < len(lines) and lines[index][0] > indent:
+                child, index = _parse_node(lines, index)
+                mapping = {key_text: child}
+            else:
+                mapping = {key_text: None}
+            if index < len(lines) and lines[index][0] > indent and not lines[index][1].startswith("- "):
+                extra, index = _parse_map(lines, index, lines[index][0])
+                mapping.update(extra)
+            items.append(mapping)
             continue
         items.append(_scalar(item))
     return items, index

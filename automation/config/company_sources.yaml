@@ -1,0 +1,10 @@
+# Public company career pages. Leave empty until a real careers URL is verified.
+# Do not invent company sites. Example:
+# companies:
+#   - name: Example Health AI
+#     domains:
+#       - example.com
+#     careers_urls:
+#       - https://example.com/careers
+#     enabled: false
+companies: []

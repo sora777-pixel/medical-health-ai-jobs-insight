@@ -91,7 +91,10 @@ def test_removed_postings_are_counted_as_deleted(config: Config, tmp_path: Path,
     report = pipeline.run()
 
     assert report.kept == 1
-    assert report.diff["deleted_jobs"] == 1
+    # 一次没再出现不能删除；来源不健康或未满连续缺席次数时保留历史岗位。
+    assert report.diff["deleted_jobs"] == 0
+    stored = read(config.data_dir / "jobs.json")
+    assert len(stored) >= 2
 
 
 def test_run_history_and_state_are_persisted(config: Config):

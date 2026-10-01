@@ -203,6 +203,42 @@ python -m jobsinsight browser-login boss
 
 ---
 
+## 真实职位怎么进来
+
+招聘平台页面经常要求登录、验证码或安全校验。这个项目**不会绕过**这些限制，也不会把搜索摘要当成完整职位。
+
+数据按这个顺序补充：
+
+1. 你有权访问的官方接口或已登录的浏览器会话
+2. 企业公开 Careers 页、JSON-LD、sitemap、RSS
+3. 公开搜索发现（Serper、Bing、Google CSE；都没有密钥时用 DuckDuckGo，状态记为 degraded）
+4. 打得开的招聘平台公开详情页
+
+搜索只证明“有一个候选链接”。薪资、学历、年限和技能只有页面里写了才填写，否则保持空，并标记 `partial`。
+
+历史岗位按增量合并。来源是 `blocked`、`unavailable` 或 `degraded` 时，**不会**因为这次没抓到就删除旧岗位。只有该来源连续多次健康采集且职位一直没有出现，才会先标成 stale，再标成 deleted。`--limit` 只限制每个来源本次新处理的条数，不会把 `jobs.json` 截成那么少。若确实要用本次结果替换全库，必须额外加上 `--replace-with-limit`。
+
+搜索密钥和 LLM 密钥分开，写在环境变量里：
+
+```text
+SERPER_API_KEY
+BING_SEARCH_API_KEY
+GOOGLE_CSE_API_KEY
+GOOGLE_CSE_ID
+```
+
+企业招聘页写在 `automation/config/company_sources.yaml`，只填你核实过的公开地址。
+
+```bash
+python -m jobsinsight search providers
+python -m jobsinsight search test --query "site:zhipin.com 上海 医疗AI"
+python -m jobsinsight sources test --all
+python -m jobsinsight sources health
+python -m jobsinsight ingest preview --query "上海 医疗AI"
+```
+
+覆盖情况在 `automation/state/source_coverage.json`。接口：`GET /api/sources`、`GET /api/sources/health`、`GET /api/search/providers`。
+
 ## HTTP 控制接口
 
 `python -m jobsinsight serve` 之后可用：

@@ -35,7 +35,11 @@ port = 0
 def config_file(tmp_path: Path, seed_file: Path) -> Path:
     path = tmp_path / "config.toml"
     path.write_text(
-        CONFIG_TEMPLATE.format(seed=seed_file, data=tmp_path / "data", state=tmp_path / "state"),
+        CONFIG_TEMPLATE.format(
+            seed=seed_file.resolve().as_posix(),
+            data=(tmp_path / "data").resolve().as_posix(),
+            state=(tmp_path / "state").resolve().as_posix(),
+        ),
         encoding="utf-8",
     )
     return path

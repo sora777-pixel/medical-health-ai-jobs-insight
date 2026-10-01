@@ -20,6 +20,7 @@ from . import analysis
 from .collectors import CollectorContext, CollectorError, build_collector
 from .config import Config
 from .enrich import Enricher
+from .job_store import merge_jobs, should_preserve_previous
 from .llm import LLMClient, LLMError, build_client
 from .models import Job, RawPosting, RunDiff
 from .quality import assess_jobs
@@ -95,6 +96,7 @@ class Pipeline:
         trigger: str = "manual",
         dry_run: bool = False,
         limit: int | None = None,
+        replace_with_limit: bool = False,
         run_id: str | None = None,
     ) -> RunReport:
         started = time.monotonic()
@@ -117,6 +119,12 @@ class Pipeline:
             return self._finish(report, started, persist=not dry_run)
 
         if not postings:
+            existing = [] if replace_with_limit else self._existing_jobs()
+            if existing and should_preserve_previous(0, self._merge_reports(source_reports)):
+                report.status = "partial" if report.errors else "skipped"
+                report.kept = len([job for job in existing if job.status != "deleted"])
+                report.errors.append("没有健康来源的新岗位，已保留上一版数据")
+                return self._finish(report, started, persist=not dry_run)
             report.status = "failed" if report.errors else "skipped"
             return self._finish(report, started, persist=not dry_run)
 
@@ -143,18 +151,35 @@ class Pipeline:
             )
             return self._finish(report, started, persist=not dry_run)
 
+        existing = [] if replace_with_limit else self._existing_jobs()
+        merged = merge_jobs(
+            existing,
+            kept,
+            self._merge_reports(source_reports),
+            utc_now_iso(),
+            stale_after=self.config.output.stale_after_misses,
+            delete_after=self.config.output.delete_after_misses,
+            allow_misses=limit is None and not replace_with_limit,
+        )
+        final_jobs = merged.jobs
+        active_jobs = [job for job in final_jobs if job.status != "deleted"]
         previous = self.store.load_snapshot()
-        diff = analysis.diff_jobs(previous, kept)
+        diff = analysis.diff_jobs(previous, active_jobs)
+        diff.new_jobs = merged.new
+        diff.updated_jobs = merged.updated
+        diff.deleted_jobs = merged.deleted
+        diff.unchanged_jobs = merged.unchanged
         report.diff = diff.as_dict()
 
-        stats = analysis.build_stats(kept, diff)
+        stats = analysis.build_stats(active_jobs, diff)
         stats["run_id"] = report.run_id
         stats["generated_at"] = utc_now_iso()
-        report.data_version = _data_version(kept)
+        report.data_version = _data_version(active_jobs)
         stats["data_version"] = report.data_version
         stats["quality"] = report.quality
         stats["freshness"] = report.freshness
-        insights = self._build_insights(enricher, stats, kept, diff)
+        stats["merge"] = merged.as_dict()
+        insights = self._build_insights(enricher, stats, active_jobs, diff)
         report.insights_generated = insights.get("source") == "llm"
         if report.errors:
             report.status = "partial"
@@ -162,11 +187,45 @@ class Pipeline:
         if dry_run:
             LOGGER.info("dry-run：跳过写入，%d 个岗位已处理", len(kept))
         else:
-            report.outputs = [str(path) for path in self._write(kept, stats, insights, report)]
-            self.store.save_snapshot([job.as_dict() for job in kept])
+            report.outputs = [str(path) for path in self._write(final_jobs, stats, insights, report)]
+            self.store.save_snapshot([job.as_dict() for job in active_jobs])
+            self._write_coverage(source_reports)
             report.published = True
 
         return self._finish(report, started, persist=not dry_run)
+
+    def _existing_jobs(self) -> list[Job]:
+        from .store import read_json
+
+        raw = read_json(self.config.data_dir / JOBS_FILE, []) or []
+        if not isinstance(raw, list):
+            return []
+        return [Job.from_dict(item) for item in raw if isinstance(item, dict) and item.get("title")]
+
+    def _merge_reports(self, source_reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        from .sources.health import load_health
+
+        health = load_health(self.config.state_dir)
+        extra = [item for item in (health.get("sources") or {}).values() if isinstance(item, dict)]
+        return [*source_reports, *extra]
+
+    def _write_coverage(self, source_reports: list[dict[str, Any]]) -> None:
+        from .sources.health import load_health
+
+        health = load_health(self.config.state_dir)
+        sources = {}
+        for name, item in (health.get("sources") or {}).items():
+            if not isinstance(item, dict):
+                continue
+            sources[name] = {
+                "discovered": item.get("discovered", item.get("jobs_found", 0)),
+                "valid": item.get("valid", item.get("jobs_valid", 0)),
+                "status": item.get("status", ""),
+            }
+        write_json(
+            self.config.state_dir / "source_coverage.json",
+            {"date": datetime.now(UTC).date().isoformat(), "sources": sources, "run_sources": source_reports},
+        )
 
     # -------------------------------------------------------------- internals
 
@@ -213,6 +272,8 @@ class Pipeline:
 
             added = 0
             for posting in collected:
+                if limit and added >= limit:
+                    break
                 key = posting.fingerprint
                 if key in seen:
                     continue
@@ -225,7 +286,7 @@ class Pipeline:
             reports.append(entry)
 
         self.store.update_sources_health(reports)
-        cap = limit or self.config.output.max_jobs
+        cap = self.config.output.max_jobs
         if cap and len(postings) > cap:
             postings = postings[:cap]
         return postings, reports

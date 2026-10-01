@@ -42,7 +42,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = sub.add_parser("run", help="立即执行一次流水线")
     run.add_argument("--dry-run", action="store_true", help="只跑流程，不写文件")
-    run.add_argument("--limit", type=int, help="最多处理多少个岗位")
+    run.add_argument("--limit", type=int, help="每个来源最多处理多少条新岗位，不会截断已有 jobs.json")
+    run.add_argument("--replace-with-limit", action="store_true", help="显式用本次 limit 结果替换数据集")
+    run.add_argument("--mode", choices=("incremental",), default="incremental", help="默认增量合并")
     run.add_argument("--no-llm", action="store_true", help="本次运行禁用 LLM，仅用规则解析")
     run.add_argument("--if-due", action="store_true", help="只有到了用户设定的运行时间才执行（供 CI 定时任务使用）")
     run.add_argument("--trigger", default="cli", help="记录在运行历史里的触发来源")
@@ -96,6 +98,25 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("--check", action="store_true", help="只检查是否一致，不修改文件")
 
     sub.add_parser("history", help="打印运行历史")
+
+    sources = sub.add_parser("sources", help="查看或探测公开招聘数据源")
+    sources_sub = sources.add_subparsers(dest="sources_command", required=True)
+    sources_sub.add_parser("health", help="打印最近一次数据源健康状态")
+    source_test = sources_sub.add_parser("test", help="探测数据源，不绕过登录或验证码")
+    source_test.add_argument("--source", default="", help="zhipin / 51job / liepin")
+    source_test.add_argument("--all", action="store_true", help="探测全部已启用来源")
+
+    search = sub.add_parser("search", help="查看或探测公开搜索提供方")
+    search_sub = search.add_subparsers(dest="search_command", required=True)
+    search_sub.add_parser("providers", help="列出搜索提供方是否已配置")
+    search_test = search_sub.add_parser("test", help="用一条公开查询探测搜索提供方")
+    search_test.add_argument("--provider", default="", help="serper / bing / google_cse / ddgs")
+    search_test.add_argument("--query", default="site:zhipin.com 上海 医疗AI")
+
+    ingest = sub.add_parser("ingest", help="预览采集，不写 jobs.json")
+    ingest_sub = ingest.add_subparsers(dest="ingest_command", required=True)
+    preview = ingest_sub.add_parser("preview", help="只发现候选职位，不发布")
+    preview.add_argument("--query", default="上海 医疗AI")
     return parser
 
 
@@ -126,6 +147,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "llm": _cmd_llm,
         "sync-cron": _cmd_sync_cron,
         "history": _cmd_history,
+        "sources": _cmd_sources,
+        "search": _cmd_search,
+        "ingest": _cmd_ingest,
     }
     return handlers[args.command](config, args)
 
@@ -142,7 +166,12 @@ def _cmd_run(config: Config, args: argparse.Namespace) -> int:
             print(f"当前未到运行时间（{config.schedule.describe()}），跳过。")
             return 0
 
-    report = Pipeline(config).run(trigger=args.trigger, dry_run=args.dry_run, limit=args.limit)
+    report = Pipeline(config).run(
+        trigger=args.trigger,
+        dry_run=args.dry_run,
+        limit=args.limit,
+        replace_with_limit=args.replace_with_limit,
+    )
     print(json.dumps(report.as_dict(), ensure_ascii=False, indent=2))
     return 0 if report.status in ("success", "partial", "skipped") else 1
 
@@ -234,7 +263,7 @@ def _cmd_doctor(config: Config, args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(summary(checks), ensure_ascii=False, indent=2))
     else:
-        icons = {"ok": "✓", "warning": "!", "error": "✗"}
+        icons = {"ok": "[ok]", "warning": "[warn]", "error": "[error]"}
         for check in checks:
             print(f"{icons[check.level]} {check.name}: {check.message}")
             if check.hint:
@@ -290,6 +319,83 @@ def _cmd_sync_cron(config: Config, args: argparse.Namespace) -> int:
         print(f"已更新 {workflow_path}: {result.previous!r} -> {result.expected!r}")
     else:
         print(f"{workflow_path} 已是最新（cron: {result.expected}）")
+    return 0
+
+
+def _cmd_sources(config: Config, args: argparse.Namespace) -> int:
+    from .sources.health import load_health
+    from .sources.runner import test_sources
+
+    if args.sources_command == "health":
+        print(json.dumps(load_health(config.state_dir), ensure_ascii=False, indent=2))
+        return 0
+    if not args.all and not args.source:
+        print("请指定 --source 或 --all", file=sys.stderr)
+        return 2
+    report = test_sources(config, source=args.source, test_all=args.all)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0 if report["sources"] else 2
+
+
+def _cmd_search(config: Config, args: argparse.Namespace) -> int:
+    from .sources.http_client import HttpClient
+    from .sources.search_provider import choose_provider, provider_catalog
+
+    if args.search_command == "providers":
+        print(json.dumps({"providers": provider_catalog()}, ensure_ascii=False, indent=2))
+        return 0
+    client = HttpClient()
+    provider = choose_provider(client)
+    if args.provider and (provider is None or provider.name != args.provider):
+        print(
+            json.dumps(
+                {"provider": args.provider, "status": "unavailable", "error": "provider not selected"},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if provider is None:
+        print(json.dumps({"provider": "unavailable", "hits": []}, ensure_ascii=False, indent=2))
+        return 0
+    outcome = provider.search(args.query, limit=5)
+    print(
+        json.dumps(
+            {
+                "provider": outcome.provider,
+                "status": outcome.status,
+                "error": outcome.error,
+                "hits": [hit.__dict__ for hit in outcome.hits],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
+def _cmd_ingest(config: Config, args: argparse.Namespace) -> int:
+    from .sources.http_client import HttpClient
+    from .sources.search_provider import choose_provider
+
+    provider = choose_provider(HttpClient())
+    query = args.query
+    outcome = provider.search(query, limit=5) if provider else None
+    hits = []
+    if outcome is not None:
+        hits = [{"title": hit.title, "url": hit.url, "snippet": hit.snippet, "partial": True} for hit in outcome.hits]
+    print(
+        json.dumps(
+            {
+                "query": query,
+                "provider": provider.name if provider else "unavailable",
+                "wrote_jobs": False,
+                "hits": hits,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0
 
 

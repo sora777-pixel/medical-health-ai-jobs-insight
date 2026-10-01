@@ -90,6 +90,31 @@ enabled = true
 path = "automation/data/seed_postings.json"
 limit = 500
 
+[[sources]]
+name = "job-discovery"
+type = "search_discovery"
+enabled = true
+required = false
+platform = "search"
+limit = 30
+
+[sources.options]
+config = "automation/config/sources.yaml"
+queries = "automation/config/job_queries.yaml"
+max_queries = 2
+detail_limit = 4
+
+[[sources]]
+name = "company-careers"
+type = "company_careers"
+enabled = true
+required = false
+platform = "企业招聘"
+limit = 30
+
+[sources.options]
+config = "automation/config/company_sources.yaml"
+
 # 真实平台示例：填入你有权访问的搜索接口与 Cookie 后启用。
 # [[sources]]
 # name = "51job"

@@ -10,7 +10,14 @@
 自定义来源可以通过 :func:`register_collector` 注册。
 """
 
-from . import browser, fixture, html_llm, json_api  # noqa: F401 - imported for registration
+from . import (  # noqa: F401 - imported for registration
+    browser,
+    company_careers,
+    fixture,
+    html_llm,
+    json_api,
+    search_discovery,
+)
 from .base import (
     Collector,
     CollectorContext,

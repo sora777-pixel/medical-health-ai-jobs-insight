@@ -77,11 +77,14 @@ class Enricher:
 
         if self.llm_active:
             budget = self.settings.max_jobs_per_run or len(postings)
-            overrides = self._llm_overrides(postings[:budget])
+            eligible = [posting for posting in postings if not posting.partial]
+            overrides = self._llm_overrides(eligible[:budget])
 
         jobs: list[Job] = []
         for index, posting in enumerate(postings, start=1):
             base = heuristics.normalise(posting)
+            if posting.partial:
+                base = _strip_unevidenced(posting, base)
             override = overrides.get(posting.source_id)
             if override:
                 base = _merge_override(base, override)
@@ -297,8 +300,8 @@ def _build_job(index: int, posting: RawPosting, values: Mapping[str, Any], run_d
         city=posting.city.strip() or "未知",
         salary_min=int(values.get("salary_min") or 0),
         salary_max=int(values.get("salary_max") or 0),
-        experience=str(values.get("experience") or "1-3年"),
-        education=str(values.get("education") or "本科"),
+        experience=_or_default(values.get("experience"), "1-3年", keep_blank=posting.partial),
+        education=_or_default(values.get("education"), "本科", keep_blank=posting.partial),
         job_level=str(values.get("job_level") or "中级"),
         summary=str(values.get("summary") or ""),
         skills=list(values.get("skills") or []),
@@ -313,7 +316,39 @@ def _build_job(index: int, posting: RawPosting, values: Mapping[str, Any], run_d
         relevance=int(values.get("relevance") or 0),
         enriched_by=enriched_by,
         fingerprint=posting.fingerprint,
+        source_type=posting.source_type,
+        discovery_method=posting.discovery_method,
+        retrieved_at=posting.retrieved_at,
+        partial=posting.partial,
+        source_url=posting.source_url or posting.url,
+        discovery_query=posting.discovery_query,
+        detail_fetch_status=posting.detail_fetch_status,
     )
+
+
+def _or_default(value: Any, default: str, *, keep_blank: bool) -> str:
+    if value is None:
+        return "" if keep_blank else default
+    text = str(value)
+    if not text and not keep_blank:
+        return default
+    return text
+
+
+def _strip_unevidenced(posting: RawPosting, values: dict[str, Any]) -> dict[str, Any]:
+    """A search snippet must not gain salary, seniority or education it never stated."""
+
+    cleaned = dict(values)
+    if not posting.salary_text:
+        cleaned["salary_min"] = 0
+        cleaned["salary_max"] = 0
+    if not posting.experience_text:
+        cleaned["experience"] = ""
+    if not posting.education_text:
+        cleaned["education"] = ""
+    if not posting.description and not posting.title:
+        cleaned["skills"] = []
+    return cleaned
 
 
 def _insight_stats(stats: Mapping[str, Any]) -> dict[str, Any]:
